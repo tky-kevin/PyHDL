@@ -673,16 +673,28 @@ class PyHDLTranspiler(ast.NodeVisitor):
         subject = self.visit(node.subject)
         case_lines = [f"unique case ({subject})"]
         original_list = list(target_list)
+        has_default = False
         
         for case in node.cases:
             pattern = self.visit(case.pattern)
             target_list.clear()
             
-            for stmt in case.body:
-                self.visit(stmt)
-            
-            branch_stmts = [f"        {line}" for s in target_list for line in s.split('\n')]
-            case_lines.append(f"    {pattern}: begin\n" + "\n".join(branch_stmts) + "\n    end")
+            # Check if this is a wildcard/default pattern
+            if isinstance(case.pattern, ast.MatchAs) and case.pattern.pattern is None:
+                has_default = True
+                for stmt in case.body:
+                    self.visit(stmt)
+                branch_stmts = [f"        {line}" for s in target_list for line in s.split('\n')]
+                case_lines.append(f"    default: begin\n" + "\n".join(branch_stmts) + "\n    end")
+            else:
+                for stmt in case.body:
+                    self.visit(stmt)
+                branch_stmts = [f"        {line}" for s in target_list for line in s.split('\n')]
+                case_lines.append(f"    {pattern}: begin\n" + "\n".join(branch_stmts) + "\n    end")
+        
+        # Add default if not present
+        if not has_default:
+            case_lines.append("    default: begin\n    end")
         
         case_lines.append("endcase")
         target_list.clear()
@@ -850,9 +862,10 @@ class PyHDLTranspiler(ast.NodeVisitor):
         
         # Enum typedefs
         for name, info in mod.enums.items():
-            states = ", ".join([f"{k}={v}" for k, v in info['states'].items()])
+            width = info['width']
+            states = ", ".join([f"{k}={width}'d{v}" for k, v in info['states'].items()])
             lines.append(
-                f"    typedef enum logic [{info['width']-1}:0] {{{states}}} {name}_t;"
+                f"    typedef enum logic [{width-1}:0] {{{states}}} {name}_t;"
             )
         
         # Internal signal declarations

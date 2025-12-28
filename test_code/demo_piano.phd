@@ -1,0 +1,164 @@
+# ==============================================================================
+# Demo: Piano - 電子琴模組 (含錄音/回放功能)
+# ==============================================================================
+# 功能：
+#   - 8 個按鍵對應 8 個音階 (C4~C5)
+#   - 可錄製 4 首歌曲，每首最多 3000 個取樣點
+#   - 支援錄音與回放切換
+# ==============================================================================
+
+from core import bit, In, Out, Module, Enum
+
+# ==============================================================================
+# 主模組：Piano
+# ==============================================================================
+class Piano(Module):
+    # --- 參數定義 ---
+    SAMPLES_PER_SONG = 3000
+    TOTAL_RAM_SIZE = 12000  # SAMPLES_PER_SONG * 4
+
+    # --- 埠宣告 ---
+    clk = In(bit)               # 50MHz 時脈
+    keys = In(bit[8])           # 8 個按鍵輸入
+    song_sel = In(bit[2])       # 歌曲選擇 (0~3)
+    rec_btn = In(bit)           # 錄音按鈕
+    play_btn = In(bit)          # 回放按鈕
+    buzzer = Out(bit)           # 蜂鳴器輸出
+
+    # --- 狀態機定義 ---
+    class State(Enum):
+        IDLE = 0
+        REC = 1
+        PLAY = 2
+
+    # --- 內部訊號 ---
+    state = State
+    active_keys = bit[8]
+    counter_limit = bit[20]
+    counter = bit[20]
+    buzzer_reg = bit
+
+    # --- 記憶體相關 ---
+    ram = bit[TOTAL_RAM_SIZE][8]    # 12000 x 8-bit RAM
+    ram_addr = bit[14]              # RAM 位址
+    addr_offset = bit[12]           # 歌曲內偏移 (0~2999)
+    max_addr = bit[4][12]           # 4 首歌的長度記錄
+    ram_out = bit[8]                # RAM 讀出資料
+
+    # 取樣計數器 (100Hz @ 50MHz)
+    sample_cnt = bit[19]
+
+    # 邊緣檢測暫存器
+    r_sync = bit
+    r_prev = bit
+    p_sync = bit
+    p_prev = bit
+
+    # --- 組合邏輯：位址計算 ---
+    base_addr = bit[14]
+    base_addr = song_sel * SAMPLES_PER_SONG
+    ram_addr = base_addr + addr_offset
+
+    # --- 組合邏輯：取樣觸發 ---
+    sample_tick = bit
+    if sample_cnt == 499999:
+        sample_tick = 1
+    else:
+        sample_tick = 0
+
+    # --- 組合邏輯：邊緣檢測觸發 ---
+    rec_trig = bit
+    play_trig = bit
+    rec_trig = r_prev and (not r_sync)
+    play_trig = p_prev and (not p_sync)
+
+    # ===========================================================================
+    # 時序邏輯：邊緣檢測同步器
+    # ===========================================================================
+    if clk.posedge:
+        r_sync = rec_btn
+        r_prev = r_sync
+        p_sync = play_btn
+        p_prev = p_sync
+
+    # ===========================================================================
+    # 時序邏輯：RAM 讀寫
+    # ===========================================================================
+    if clk.posedge:
+        # 錄音時寫入 RAM
+        if state == State.REC:
+            if sample_tick:
+                ram[ram_addr] = keys
+        # 同步讀取 RAM
+        ram_out = ram[ram_addr]
+
+    # ===========================================================================
+    # 時序邏輯：狀態機控制
+    # ===========================================================================
+    if clk.posedge:
+        match state:
+            case State.IDLE:
+                addr_offset = 0
+                sample_cnt = 0
+                active_keys = keys
+                if rec_trig:
+                    state = State.REC
+                elif play_trig:
+                    state = State.PLAY
+
+            case State.REC:
+                active_keys = keys
+                sample_cnt = sample_cnt + 1
+                if rec_trig or (addr_offset == (SAMPLES_PER_SONG - 1)):
+                    max_addr[song_sel] = addr_offset
+                    state = State.IDLE
+                elif sample_tick:
+                    sample_cnt = 0
+                    addr_offset = addr_offset + 1
+
+            case State.PLAY:
+                active_keys = ram_out
+                sample_cnt = sample_cnt + 1
+                if play_trig or (addr_offset == max_addr[song_sel]):
+                    state = State.IDLE
+                elif sample_tick:
+                    sample_cnt = 0
+                    addr_offset = addr_offset + 1
+
+    # ===========================================================================
+    # 組合邏輯：音階對照表 (按鍵 -> 頻率分頻值)
+    # ===========================================================================
+    counter_limit = 0
+    match active_keys:
+        case 0b11111110:    # C4 (Do)
+            counter_limit = 95566
+        case 0b11111101:    # D4 (Re)
+            counter_limit = 85118
+        case 0b11111011:    # E4 (Mi)
+            counter_limit = 75867
+        case 0b11110111:    # F4 (Fa)
+            counter_limit = 71546
+        case 0b11101111:    # G4 (Sol)
+            counter_limit = 63775
+        case 0b11011111:    # A4 (La)
+            counter_limit = 56818
+        case 0b10111111:    # B4 (Si)
+            counter_limit = 50617
+        case 0b01111111:    # C5 (高音Do)
+            counter_limit = 47783
+
+    # ===========================================================================
+    # 時序邏輯：方波產生器 (蜂鳴器驅動)
+    # ===========================================================================
+    if clk.posedge:
+        if counter_limit == 0:
+            counter = 0
+            buzzer_reg = 0
+        elif counter >= counter_limit:
+            counter = 0
+            buzzer_reg = not buzzer_reg
+        else:
+            counter = counter + 1
+
+    # --- 輸出 ---
+    buzzer = buzzer_reg
