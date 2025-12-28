@@ -518,6 +518,8 @@ pyhdl/
 
 ## 命令列用法
 
+### 基本用法
+
 ```bash
 # 轉譯單一檔案
 python compiler.py input.phd -o output_dir/
@@ -525,9 +527,77 @@ python compiler.py input.phd -o output_dir/
 # 轉譯目錄內所有 .phd 檔案
 python compiler.py src/ -o hdl/
 
-# 啟用詳細輸出
+# 啟用詳細輸出（顯示錯誤追蹤）
 python compiler.py src/ -o hdl/ -v
 ```
+
+### 整合至 Quartus / FPGA 專案
+
+PyHDL 設計為可直接整合進 FPGA 開發流程。建議的目錄結構：
+
+```
+my_fpga_project/
+├── pyhdl/              ← PyHDL 轉譯器（複製或 git submodule）
+│   ├── compiler.py
+│   ├── transpiler.py
+│   └── core.py
+├── src/                ← PyHDL 原始碼 (.phd)
+│   ├── my_module.phd
+│   ├── top.phd
+│   └── ...
+├── hdl/                ← 生成的 SystemVerilog (.sv)
+│   ├── my_module.sv
+│   ├── top.sv
+│   └── ...
+├── my_project.qpf      ← Quartus 專案
+└── my_project.qsf
+```
+
+**使用方式：**
+
+```bash
+cd my_fpga_project/pyhdl
+python compiler.py              # 預設：讀取 ../src，輸出至 ../hdl
+python compiler.py -v           # 詳細模式
+```
+
+執行後，Quartus 可直接使用 `hdl/` 目錄中的 `.sv` 檔案進行編譯。
+
+### 使用 Git Submodule 整合 PyHDL（推薦）
+
+將 PyHDL 作為 Git Submodule 加入專案，可方便追蹤更新：
+
+**首次加入專案：**
+
+```bash
+cd my_fpga_project
+git submodule add https://github.com/tky-kevin/PyHDL.git pyhdl
+git commit -m "Add PyHDL as submodule"
+```
+
+**克隆包含 PyHDL 的專案：**
+
+```bash
+# 方法一：克隆時一併初始化子模組
+git clone --recursive https://github.com/yourname/my_fpga_project.git
+
+# 方法二：已克隆後再初始化
+git clone https://github.com/yourname/my_fpga_project.git
+cd my_fpga_project
+git submodule update --init
+```
+
+**更新 PyHDL 至最新版本：**
+
+```bash
+cd my_fpga_project/pyhdl
+git pull origin master
+cd ..
+git add pyhdl
+git commit -m "Update PyHDL to latest version"
+```
+
+> **Submodule 與直接複製的差異**：Submodule 會保留與上游倉庫的連結，方便隨時獲取 PyHDL 的更新與修復。
 
 ---
 

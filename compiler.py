@@ -131,13 +131,13 @@ Examples:
     parser.add_argument(
         "input", 
         nargs="?", 
-        default="./src",
-        help="Input .phd file or directory (default: ./src)"
+        default="../src",
+        help="Input .phd file or directory (default: ../src)"
     )
     parser.add_argument(
         "-o", "--outdir", 
-        default="./hdl",
-        help="Output directory for .sv files (default: ./hdl)"
+        default="../hdl",
+        help="Output directory for .sv files (default: ../hdl)"
     )
     parser.add_argument(
         "-v", "--verbose", 
