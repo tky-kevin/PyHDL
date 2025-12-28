@@ -6,7 +6,7 @@
 #   3. 同步 RAM
 #   4. 雙埠 RAM
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class SinglePortRAM(Module):
     DEPTH = 16

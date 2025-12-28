@@ -7,7 +7,7 @@
 #   4. 非同步低電平復位 (negedge rst_n)
 #   5. 計數器、暫存器
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class SimpleRegister(Module):
     clk = In(bit)

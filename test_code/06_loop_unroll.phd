@@ -6,7 +6,7 @@
 #   3. range(start, stop, step) 形式
 #   4. 迴圈內的條件邏輯
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class BitReverse(Module):
     WIDTH = 8

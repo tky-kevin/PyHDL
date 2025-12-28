@@ -6,7 +6,7 @@
 #   3. if-elif-else 扁平化
 #   4. 預設賦值防止 Latch
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class TernaryExpr(Module):
     sel = In(bit)

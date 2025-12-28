@@ -16,6 +16,9 @@ Functions:
     Out(t): Marks a port as output
 """
 
+# Exported symbols for 'from pyhdl import *'
+__all__ = ['Module', 'bit', 'Enum', 'In', 'Out']
+
 
 class Module:
     """Base class for all hardware modules.

@@ -6,7 +6,7 @@
 #   3. 元組串接 (a, b, c) -> {a, b, c}
 #   4. 常數在串接中的處理
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class BitSlicing(Module):
     data_16 = In(bit[16])

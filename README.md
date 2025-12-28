@@ -78,7 +78,7 @@ pip install colorama
 建立檔案 `example.phd`：
 
 ```python
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class PriorityEncoder(Module):
     # 參數定義
@@ -146,7 +146,7 @@ endmodule
 硬體模組以繼承 `Module` 的 Python 類別定義：
 
 ```python
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class MyModule(Module):
     # 埠宣告
@@ -342,7 +342,7 @@ end
 使用 `Enum` 定義狀態，使用 `match/case` 描述轉移：
 
 ```python
-from core import bit, In, Out, Module, Enum
+from pyhdl import *
 
 class TrafficLight(Module):
     clk = In(bit)
@@ -472,7 +472,7 @@ endmodule
 pyhdl/
 ├── compiler.py        # 命令列介面入口
 ├── transpiler.py      # 核心轉譯器（AST 訪問器與程式碼生成器）
-├── core.py            # PyHDL 基礎類別（Module, In, Out, bit, Enum）
+├── pyhdl.py           # PyHDL 基礎類別（Module, In, Out, bit, Enum）
 ├── test_code/         # 範例 .phd 原始碼
 │   ├── demo_alu.phd
 │   ├── demo_traffic_light.phd

@@ -7,7 +7,7 @@
 #   2. SLT 操作使用無號比較（註明限制）
 #   3. 更詳細的註解
 # =================================================================
-from core import bit, In, Out, Module, Enum
+from pyhdl import *
 
 class SimpleALU(Module):
     # 參數化寬度

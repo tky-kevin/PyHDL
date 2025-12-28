@@ -6,7 +6,7 @@
 #   3. 自動連線
 #   4. 子模組輸出的使用
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 # 參數化加法器 (簡化版)
 class ParamAdder(Module):

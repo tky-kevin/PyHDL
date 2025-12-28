@@ -5,7 +5,7 @@
 #   2. 各種位元寬度 (1-bit, N-bit)
 #   3. 簡單組合邏輯賦值
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class BasicPorts(Module):
     # 1-bit 埠

@@ -8,7 +8,7 @@
 #   4. 組合邏輯 (always_comb)
 #   5. 非同步低電平復位
 # =================================================================
-from core import bit, In, Out, Module, Enum
+from pyhdl import *
 
 class TrafficLight(Module):
     # --- 介面 ---

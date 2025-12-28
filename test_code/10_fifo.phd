@@ -7,7 +7,7 @@
 #   4. 狀態旗標生成
 #   5. 迴圈展開初始化
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class SyncFIFO(Module):
     # 參數

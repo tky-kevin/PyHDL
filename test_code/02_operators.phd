@@ -7,7 +7,7 @@
 #   4. 比較運算 (==, !=, <, >, <=, >=)
 #   5. 邏輯運算 (and, or, not)
 # =================================================================
-from core import bit, In, Out, Module
+from pyhdl import *
 
 class ArithmeticOps(Module):
     a = In(bit[8])

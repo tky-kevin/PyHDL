@@ -6,7 +6,7 @@
 #   3. Moore FSM
 #   4. Mealy FSM
 # =================================================================
-from core import bit, In, Out, Module, Enum
+from pyhdl import *
 
 class SimpleFSM(Module):
     clk = In(bit)
