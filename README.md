@@ -104,7 +104,7 @@ class PriorityEncoder(Module):
 ### 步驟二：執行轉譯器
 
 ```bash
-python compiler.py example.phd -o output/
+python pyhdl.py example.phd -o output/
 ```
 
 ### 步驟三：查看生成的 SystemVerilog
@@ -522,13 +522,13 @@ pyhdl/
 
 ```bash
 # 轉譯單一檔案
-python compiler.py input.phd -o output_dir/
+python pyhdl.py input.phd -o output_dir/
 
 # 轉譯目錄內所有 .phd 檔案
-python compiler.py src/ -o hdl/
+python pyhdl.py src/ -o hdl/
 
 # 啟用詳細輸出（顯示錯誤追蹤）
-python compiler.py src/ -o hdl/ -v
+python pyhdl.py src/ -o hdl/ -v
 ```
 
 ### 整合至 Quartus / FPGA 專案
@@ -538,9 +538,9 @@ PyHDL 設計為可直接整合進 FPGA 開發流程。建議的目錄結構：
 ```
 my_fpga_project/
 ├── pyhdl/              ← PyHDL 轉譯器（複製或 git submodule）
+│   ├── pyhdl.py
 │   ├── compiler.py
-│   ├── transpiler.py
-│   └── core.py
+│   └── transpiler.py
 ├── src/                ← PyHDL 原始碼 (.phd)
 │   ├── my_module.phd
 │   ├── top.phd
@@ -557,8 +557,8 @@ my_fpga_project/
 
 ```bash
 cd my_fpga_project/pyhdl
-python compiler.py              # 預設：讀取 ../src，輸出至 ../hdl
-python compiler.py -v           # 詳細模式
+python pyhdl.py              # 預設：讀取 ../src，輸出至 ../hdl
+python pyhdl.py -v           # 詳細模式
 ```
 
 執行後，Quartus 可直接使用 `hdl/` 目錄中的 `.sv` 檔案進行編譯。
