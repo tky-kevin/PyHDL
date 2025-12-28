@@ -1,0 +1,83 @@
+# =================================================================
+# 測試 04: 組合邏輯
+# 驗證目標：
+#   1. 條件表達式 (三元運算子)
+#   2. if-else 組合邏輯區塊
+#   3. if-elif-else 扁平化
+#   4. 預設賦值防止 Latch
+# =================================================================
+from core import bit, In, Out, Module
+
+class TernaryExpr(Module):
+    sel = In(bit)
+    a = In(bit[8])
+    b = In(bit[8])
+    
+    mux_out = Out(bit[8])
+    
+    # 條件表達式 -> 三元運算子
+    mux_out = a if sel else b
+
+class Mux4to1(Module):
+    sel = In(bit[2])
+    in0 = In(bit[8])
+    in1 = In(bit[8])
+    in2 = In(bit[8])
+    in3 = In(bit[8])
+    
+    out = Out(bit[8])
+    
+    # 預設值 (防止 Latch)
+    out = 0
+    
+    # if-elif-else 組合邏輯
+    if sel == 0:
+        out = in0
+    elif sel == 1:
+        out = in1
+    elif sel == 2:
+        out = in2
+    else:
+        out = in3
+
+class PriorityEncoder(Module):
+    req = In(bit[4])
+    
+    code = Out(bit[2])
+    valid = Out(bit)
+    
+    # 預設值
+    code = 0
+    valid = 0
+    
+    # 優先權編碼 (MSB 優先)
+    if req[3]:
+        code = 3
+        valid = 1
+    elif req[2]:
+        code = 2
+        valid = 1
+    elif req[1]:
+        code = 1
+        valid = 1
+    elif req[0]:
+        code = 0
+        valid = 1
+
+class Decoder2to4(Module):
+    sel = In(bit[2])
+    enable = In(bit)
+    
+    out = Out(bit[4])
+    
+    out = 0
+    
+    if enable:
+        if sel == 0:
+            out = 1
+        elif sel == 1:
+            out = 2
+        elif sel == 2:
+            out = 4
+        else:
+            out = 8

@@ -1,0 +1,100 @@
+# =================================================================
+# 測試 09: 參數化與模組實例化
+# 驗證目標：
+#   1. 參數化模組定義
+#   2. 不同參數的實例化
+#   3. 自動連線
+#   4. 子模組輸出的使用
+# =================================================================
+from core import bit, In, Out, Module
+
+# 參數化加法器 (簡化版)
+class ParamAdder(Module):
+    # width 參數在實例化時注入
+    a = In(bit[width])
+    b = In(bit[width])
+    cin = In(bit)
+    
+    sum = Out(bit[width + 1])
+    
+    # 完整加法 (包含進位)
+    sum = a + b + cin
+
+# 參數化乘法器
+class ParamMultiplier(Module):
+    a = In(bit[width])
+    b = In(bit[width])
+    
+    product = Out(bit[width * 2])
+    
+    product = a * b
+
+# 參數化比較器
+class ParamComparator(Module):
+    a = In(bit[width])
+    b = In(bit[width])
+    
+    eq = Out(bit)
+    lt = Out(bit)
+    gt = Out(bit)
+    
+    eq = a == b
+    lt = a < b
+    gt = a > b
+
+# 頂層模組：實例化不同寬度的模組
+class TopInstantiation(Module):
+    # 8-bit 輸入
+    in_8a = In(bit[8])
+    in_8b = In(bit[8])
+    carry_in = In(bit)
+    
+    # 16-bit 輸入
+    in_16a = In(bit[16])
+    in_16b = In(bit[16])
+    
+    # 加法器輸出
+    sum_8 = Out(bit[9])
+    sum_16 = Out(bit[17])
+    
+    # 乘法器輸出
+    prod_8 = Out(bit[16])
+    prod_16 = Out(bit[32])
+    
+    # 比較器輸出
+    cmp_eq = Out(bit)
+    cmp_lt = Out(bit)
+    cmp_gt = Out(bit)
+    
+    # 實例化 8-bit 加法器
+    u_add8 = ParamAdder(width=8)
+    u_add8.a = in_8a
+    u_add8.b = in_8b
+    u_add8.cin = carry_in
+    sum_8 = u_add8.sum
+    
+    # 實例化 16-bit 加法器
+    u_add16 = ParamAdder(width=16)
+    u_add16.a = in_16a
+    u_add16.b = in_16b
+    u_add16.cin = 0
+    sum_16 = u_add16.sum
+    
+    # 實例化乘法器
+    u_mul8 = ParamMultiplier(width=8)
+    u_mul8.a = in_8a
+    u_mul8.b = in_8b
+    prod_8 = u_mul8.product
+    
+    u_mul16 = ParamMultiplier(width=16)
+    u_mul16.a = in_16a
+    u_mul16.b = in_16b
+    prod_16 = u_mul16.product
+    
+    # 實例化比較器
+    u_cmp = ParamComparator(width=8)
+    u_cmp.a = in_8a
+    u_cmp.b = in_8b
+    cmp_eq = u_cmp.eq
+    cmp_lt = u_cmp.lt
+    cmp_gt = u_cmp.gt

@@ -1,0 +1,101 @@
+# =================================================================
+# 測試 10: 完整 FIFO 設計
+# 驗證目標：
+#   1. 綜合測試：組合 + 時序邏輯
+#   2. 記憶體陣列操作
+#   3. 指標管理
+#   4. 狀態旗標生成
+#   5. 迴圈展開初始化
+# =================================================================
+from core import bit, In, Out, Module
+
+class SyncFIFO(Module):
+    # 參數
+    DATA_W = 8
+    DEPTH = 16
+    PTR_W = 4
+    
+    # 時脈與復位
+    clk = In(bit)
+    rst_n = In(bit)
+    
+    # 寫入介面
+    wr_en = In(bit)
+    din = In(bit[DATA_W])
+    full = Out(bit)
+    
+    # 讀取介面
+    rd_en = In(bit)
+    dout = Out(bit[DATA_W])
+    empty = Out(bit)
+    
+    # 狀態
+    count = Out(bit[PTR_W + 1])
+    
+    # 內部訊號
+    mem = bit[DEPTH][DATA_W]
+    wr_ptr = bit[PTR_W]
+    rd_ptr = bit[PTR_W]
+    
+    # 組合邏輯：狀態旗標
+    full = 0
+    empty = 0
+    
+    if count == 0:
+        empty = 1
+    
+    if count == DEPTH:
+        full = 1
+    
+    # 時序邏輯：資料操作
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            wr_ptr = 0
+            rd_ptr = 0
+            count = 0
+            dout = 0
+            
+            for i in range(DEPTH):
+                mem[i] = 0
+        else:
+            # 寫入
+            if wr_en and (not full):
+                mem[wr_ptr] = din
+                wr_ptr = wr_ptr + 1
+                if not rd_en:
+                    count = count + 1
+            
+            # 讀取
+            if rd_en and (not empty):
+                dout = mem[rd_ptr]
+                rd_ptr = rd_ptr + 1
+                if not wr_en:
+                    count = count - 1
+
+class FIFOTestTop(Module):
+    sys_clk = In(bit)
+    sys_rst_n = In(bit)
+    
+    # 外部介面
+    data_in = In(bit[8])
+    data_valid = In(bit)
+    data_read = In(bit)
+    
+    data_out = Out(bit[8])
+    fifo_full = Out(bit)
+    fifo_empty = Out(bit)
+    fifo_count = Out(bit[5])
+    
+    # 實例化 FIFO
+    u_fifo = SyncFIFO(DATA_W=8, DEPTH=16, PTR_W=4)
+    
+    u_fifo.clk = sys_clk
+    u_fifo.rst_n = sys_rst_n
+    u_fifo.wr_en = data_valid
+    u_fifo.din = data_in
+    u_fifo.rd_en = data_read
+    
+    data_out = u_fifo.dout
+    fifo_full = u_fifo.full
+    fifo_empty = u_fifo.empty
+    fifo_count = u_fifo.count

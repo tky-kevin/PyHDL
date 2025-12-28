@@ -1,0 +1,143 @@
+# =================================================================
+# 測試 08: 有限狀態機 (FSM)
+# 驗證目標：
+#   1. Enum 狀態定義
+#   2. match-case 轉譯為 unique case
+#   3. Moore FSM
+#   4. Mealy FSM
+# =================================================================
+from core import bit, In, Out, Module, Enum
+
+class SimpleFSM(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    start = In(bit)
+    done = In(bit)
+    
+    busy = Out(bit)
+    complete = Out(bit)
+    
+    class State(Enum):
+        IDLE = 0
+        RUN = 1
+        FINISH = 2
+    
+    state = State
+    
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            state = State.IDLE
+            busy = 0
+            complete = 0
+        else:
+            # 預設輸出
+            busy = 0
+            complete = 0
+            
+            match state:
+                case State.IDLE:
+                    if start:
+                        state = State.RUN
+                        busy = 1
+                case State.RUN:
+                    busy = 1
+                    if done:
+                        state = State.FINISH
+                case State.FINISH:
+                    complete = 1
+                    state = State.IDLE
+
+class TrafficLightFSM(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    timer_done = In(bit)
+    
+    red = Out(bit)
+    yellow = Out(bit)
+    green = Out(bit)
+    
+    class Light(Enum):
+        RED = 0
+        GREEN = 1
+        YELLOW = 2
+    
+    curr_light = Light
+    
+    # 狀態轉移 (時序)
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            curr_light = Light.RED
+        else:
+            match curr_light:
+                case Light.RED:
+                    if timer_done:
+                        curr_light = Light.GREEN
+                case Light.GREEN:
+                    if timer_done:
+                        curr_light = Light.YELLOW
+                case Light.YELLOW:
+                    if timer_done:
+                        curr_light = Light.RED
+    
+    # 輸出邏輯 (組合)
+    red = 0
+    yellow = 0
+    green = 0
+    
+    match curr_light:
+        case Light.RED:
+            red = 1
+        case Light.GREEN:
+            green = 1
+        case Light.YELLOW:
+            yellow = 1
+
+class UARTReceiverFSM(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    rx = In(bit)
+    bit_done = In(bit)
+    
+    data_out = Out(bit[8])
+    data_valid = Out(bit)
+    
+    class RxState(Enum):
+        IDLE = 0
+        START = 1
+        DATA = 2
+        STOP = 3
+    
+    state = RxState
+    bit_cnt = bit[4]
+    shift_reg = bit[8]
+    
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            state = RxState.IDLE
+            bit_cnt = 0
+            shift_reg = 0
+            data_out = 0
+            data_valid = 0
+        else:
+            data_valid = 0
+            
+            match state:
+                case RxState.IDLE:
+                    if not rx:
+                        state = RxState.START
+                case RxState.START:
+                    if bit_done:
+                        state = RxState.DATA
+                        bit_cnt = 0
+                case RxState.DATA:
+                    if bit_done:
+                        shift_reg = (rx, shift_reg[7:1])
+                        bit_cnt = bit_cnt + 1
+                        if bit_cnt == 7:
+                            state = RxState.STOP
+                case RxState.STOP:
+                    if bit_done:
+                        if rx:
+                            data_out = shift_reg
+                            data_valid = 1
+                        state = RxState.IDLE

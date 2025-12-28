@@ -1,0 +1,87 @@
+# =================================================================
+# 測試 02: 運算符支援
+# 驗證目標：
+#   1. 算術運算 (+, -, *, /, %)
+#   2. 位元運算 (&, |, ^, ~)
+#   3. 位移運算 (<<, >>)
+#   4. 比較運算 (==, !=, <, >, <=, >=)
+#   5. 邏輯運算 (and, or, not)
+# =================================================================
+from core import bit, In, Out, Module
+
+class ArithmeticOps(Module):
+    a = In(bit[8])
+    b = In(bit[8])
+    
+    sum_out = Out(bit[9])
+    diff_out = Out(bit[9])
+    prod_out = Out(bit[16])
+    div_out = Out(bit[8])
+    mod_out = Out(bit[8])
+    
+    sum_out = a + b
+    diff_out = a - b
+    prod_out = a * b
+    div_out = a / b
+    mod_out = a % b
+
+class BitwiseOps(Module):
+    a = In(bit[8])
+    b = In(bit[8])
+    
+    and_out = Out(bit[8])
+    or_out = Out(bit[8])
+    xor_out = Out(bit[8])
+    not_out = Out(bit[8])
+    
+    and_out = a & b
+    or_out = a | b
+    xor_out = a ^ b
+    not_out = ~a
+
+class ShiftOps(Module):
+    data = In(bit[8])
+    shift_amt = In(bit[3])
+    
+    lshift_out = Out(bit[8])
+    rshift_out = Out(bit[8])
+    lshift_const = Out(bit[8])
+    rshift_const = Out(bit[8])
+    
+    lshift_out = data << shift_amt
+    rshift_out = data >> shift_amt
+    lshift_const = data << 2
+    rshift_const = data >> 3
+
+class CompareOps(Module):
+    a = In(bit[8])
+    b = In(bit[8])
+    
+    eq = Out(bit)
+    neq = Out(bit)
+    lt = Out(bit)
+    gt = Out(bit)
+    lte = Out(bit)
+    gte = Out(bit)
+    
+    eq = a == b
+    neq = a != b
+    lt = a < b
+    gt = a > b
+    lte = a <= b
+    gte = a >= b
+
+class LogicalOps(Module):
+    a = In(bit)
+    b = In(bit)
+    c = In(bit)
+    
+    and_result = Out(bit)
+    or_result = Out(bit)
+    not_result = Out(bit)
+    complex_result = Out(bit)
+    
+    and_result = a and b
+    or_result = a or b
+    not_result = not a
+    complex_result = (a and b) or (not c)

@@ -1,0 +1,125 @@
+# =================================================================
+# 簡單 ALU 展示模組 (改進版)
+# 功能：8-bit ALU，支援 8 種運算
+# 
+# 改進說明：
+#   1. 加入 default case 處理未定義操作碼
+#   2. SLT 操作使用無號比較（註明限制）
+#   3. 更詳細的註解
+# =================================================================
+from core import bit, In, Out, Module, Enum
+
+class SimpleALU(Module):
+    # 參數化寬度
+    WIDTH = 8
+    
+    # ====== 輸入 ======
+    a = In(bit[WIDTH])
+    b = In(bit[WIDTH])
+    op = In(bit[4])  # 4-bit 操作碼，最多 16 種運算
+    
+    # ====== 輸出 ======
+    result = Out(bit[WIDTH])
+    zero = Out(bit)      # 結果為零旗標
+    carry = Out(bit)     # 進位/借位旗標
+    overflow = Out(bit)  # 溢位旗標 (有號數)
+    
+    # ====== 內部暫存器 ======
+    temp = bit[WIDTH + 1]  # 保存完整結果（含進位）
+    
+    # ====== 操作碼定義 (MIPS 風格) ======
+    OP_ADD  = 0   # 加法
+    OP_SUB  = 1   # 減法
+    OP_AND  = 2   # 位元 AND
+    OP_OR   = 3   # 位元 OR
+    OP_XOR  = 4   # 位元 XOR
+    OP_NOR  = 5   # 位元 NOR (MIPS 經典!)
+    OP_SLTU = 6   # Set Less Than Unsigned (無號比較)
+    OP_SLL  = 7   # 左移 (Shift Left Logical)
+    
+    # ====== 預設值（防止 Latch）======
+    result = 0
+    zero = 0
+    carry = 0
+    overflow = 0
+    temp = 0
+    
+    # ====== 主要邏輯 ======
+    match op:
+        case 0:  # ADD
+            temp = a + b
+            result = temp[7:0]
+            carry = temp[8]
+            # 溢位檢測：同號相加得異號 (有號數溢位)
+            overflow = (a[7] == b[7]) and (a[7] != result[7])
+            
+        case 1:  # SUB
+            temp = a - b
+            result = temp[7:0]
+            # 注意：減法借位時 temp[8] = 1
+            carry = temp[8]
+            # 溢位：A、B 異號且結果與 A 異號
+            overflow = (a[7] != b[7]) and (b[7] == result[7])
+            
+        case 2:  # AND
+            result = a & b
+            
+        case 3:  # OR
+            result = a | b
+            
+        case 4:  # XOR
+            result = a ^ b
+            
+        case 5:  # NOR (MIPS 最愛! not(a or b))
+            result = ~(a | b)
+            
+        case 6:  # SLTU (Set Less Than Unsigned)
+            # ⚠️ 注意：這是無號數比較
+            # PyHDL 目前不支援 $signed()，無法做有號比較
+            # 若需要有號 SLT，需擴展轉譯器支援
+            if a < b:
+                result = 1
+            else:
+                result = 0
+                
+        case 7:  # SLL (Shift Left Logical)
+            # 只取 b[2:0] (0-7)，因為移動 8 位以上結果恆為 0
+            result = a << b[2:0]
+    
+    # ====== 其他操作碼 (8-15) ======
+    # default case 由預設值處理，result 保持 0
+    # unique case 在 op=8~15 時會使用預設值
+    
+    # ====== Zero 旗標 ======
+    if result == 0:
+        zero = 1
+
+
+# =================================================================
+# 頂層測試模組
+# 
+# 注意：PyHDL 自動生成中間訊號連接子模組
+# 這是轉譯器的設計選擇，確保訊號可追蹤
+# =================================================================
+class ALU_TestTop(Module):
+    sys_a = In(bit[8])
+    sys_b = In(bit[8])
+    sys_op = In(bit[4])
+    
+    sys_result = Out(bit[8])
+    sys_zero = Out(bit)
+    sys_carry = Out(bit)
+    sys_overflow = Out(bit)
+    
+    # 實例化 ALU
+    u_alu = SimpleALU()
+    u_alu.a = sys_a
+    u_alu.b = sys_b
+    u_alu.op = sys_op
+    
+    # 連接輸出
+    # (PyHDL 自動生成 u_alu_result 等中間訊號)
+    sys_result = u_alu.result
+    sys_zero = u_alu.zero
+    sys_carry = u_alu.carry
+    sys_overflow = u_alu.overflow

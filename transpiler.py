@@ -1,61 +1,211 @@
+"""
+PyHDL Transpiler
+================
+Core transpilation engine that converts PyHDL (Python) AST to SystemVerilog.
+
+This module implements an AST visitor that traverses Python syntax trees
+and generates equivalent SystemVerilog code. It handles:
+- Module and port declarations
+- Combinational and sequential logic
+- Loop unrolling for hardware generation
+- Parameterized module instantiation
+- Finite state machines with Enum
+- Bit slicing and concatenation
+
+Classes:
+    ModuleContext: Stores context information for a hardware module
+    PyHDLTranspiler: Main AST visitor that performs the transpilation
+
+Author: PyHDL Team
+"""
+
 import ast
 import math
+import operator
+from typing import Dict, List, Optional, Any, Tuple
+
+
+# =============================================================================
+# Module Context
+# =============================================================================
 
 class ModuleContext:
-    """儲存單個硬體模組 (Module) 的獨立上下文資訊"""
-    def __init__(self, name):
+    """Stores all context information for a hardware module during transpilation.
+    
+    Attributes:
+        name: Module name
+        symbol_table: Maps signal names to their dimension info
+        constants: Compile-time constant values
+        ports: List of port definitions (name, direction, dimensions)
+        output_decls: Internal signal declarations
+        main_comb_block: Statements for the always_comb block
+        output_seq_blocks: Statements for always_ff blocks, keyed by clock spec
+        instances: Submodule instantiation info
+        enums: Enum definitions for FSM states
+    """
+    
+    def __init__(self, name: str):
         self.name = name
-        self.symbol_table = {}      # 變數符號表: {name: {'dims': [depth, width]}}
-        self.ports = []             # 模組埠號 (Ports): In/Out
-        self.output_decls = []      # 內部信號 (Internal Signals) 宣告
-        self.output_assigns = []    # 組合邏輯 (Combinational Logic)
-        self.output_seq_blocks = {} # 同步邏輯 (Sequential Logic): {trigger: [statements]}
-        self.instances = {}         # 子模組實例化: {inst_name: {'mod': str, 'mapping': dict}}
-        self.enums = {}
+        self.symbol_table: Dict[str, dict] = {}
+        self.constants: Dict[str, int] = {}
+        self.ports: List[dict] = []
+        self.output_decls: List[str] = []
+        self.main_comb_block: List[str] = []
+        self.output_seq_blocks: Dict[str, List[str]] = {}
+        self.instances: Dict[str, dict] = {}
+        self.enums: Dict[str, dict] = {}
+
+
+# =============================================================================
+# PyHDL Transpiler
+# =============================================================================
 
 class PyHDLTranspiler(ast.NodeVisitor):
+    """Transpiles PyHDL Python code to SystemVerilog.
+    
+    This class extends Python's ast.NodeVisitor to traverse the AST and
+    generate equivalent SystemVerilog code. It maintains state about the
+    current module being processed and handles various PyHDL constructs.
+    
+    Attributes:
+        modules: Dictionary of generated modules
+        templates: Parameterized module templates
+        param_stack: Stack of parameter bindings for loop unrolling
+        current_mod: Currently processing module context
+        current_seq_clk: Current sequential logic clock specification
+        warnings: List of warning messages
+    """
+    
+    # =========================================================================
+    # Operator Mappings
+    # =========================================================================
+    
+    # Binary operators: Python AST type -> SystemVerilog operator
+    BINARY_OPS = {
+        ast.Add: '+', ast.Sub: '-', ast.Mult: '*', ast.Div: '/',
+        ast.Mod: '%', ast.Pow: '**', ast.BitAnd: '&', ast.BitOr: '|',
+        ast.BitXor: '^', ast.LShift: '<<', ast.RShift: '>>'
+    }
+    
+    # Comparison operators
+    COMPARE_OPS = {
+        ast.Eq: '==', ast.NotEq: '!=', ast.Lt: '<',
+        ast.LtE: '<=', ast.Gt: '>', ast.GtE: '>='
+    }
+    
+    # Arithmetic operators for constant evaluation
+    ARITH_OPS = {
+        ast.Add: operator.add, ast.Sub: operator.sub,
+        ast.Mult: operator.mul, ast.Div: operator.floordiv,
+        ast.Mod: operator.mod, ast.Pow: operator.pow
+    }
+    
+    # =========================================================================
+    # Initialization
+    # =========================================================================
+    
     def __init__(self):
-        self.modules = {}           # 儲存所有模組上下文: {name: ModuleContext}
-        self.current_mod = None     # 目前處理中的模組
-        self.current_seq_clk = None # 目前處理中的時脈域觸發條件
-
-    def _resolve_dims(self, node):
-        """解析 In/Out 或 Enum 類型宣告"""
-        # A. 處理 In(bit[8]) 或 Out(...)
-        if isinstance(node, ast.Call) and node.func.id in ['In', 'Out']:
-            direction = "input" if node.func.id == 'In' else "output"
-            dims = self._resolve_dims_raw(node.args[0])
-            return dims, direction
+        self.modules: Dict[str, ModuleContext] = {}
+        self.templates: Dict[str, ast.ClassDef] = {}
+        self.param_stack: List[Dict[str, int]] = []
+        self.current_mod: Optional[ModuleContext] = None
+        self.current_seq_clk: Optional[str] = None
+        self.warnings: List[str] = []
+    
+    # =========================================================================
+    # Helper Methods: Dimension and Width Resolution
+    # =========================================================================
+    
+    def _resolve_dims(self, node: ast.AST) -> Tuple[Optional[List], Optional[str]]:
+        """Resolve signal dimensions and direction from an AST node.
         
-        # B. 處理 Enum 類型宣告: curr_state = State
-        if isinstance(node, ast.Name) and self.current_mod and node.id in self.current_mod.enums:
-            # 傳回 Enum 名稱字串，作為特殊的標記
-            return [node.id], None
+        Args:
+            node: AST node representing a type annotation
             
+        Returns:
+            Tuple of (dimensions list, direction string or None)
+        """
+        if isinstance(node, ast.Call) and hasattr(node.func, 'id'):
+            if node.func.id in ['In', 'Out']:
+                direction = "input" if node.func.id == 'In' else "output"
+                dims = self._resolve_dims_raw(node.args[0])
+                return dims, direction
+        
+        if isinstance(node, ast.Name):
+            if self.current_mod and node.id in self.current_mod.enums:
+                return [node.id], None
+        
         return self._resolve_dims_raw(node), None
-
-    def _resolve_dims_raw(self, node):
-        """解析 bit[8][16] 的純維度列表"""
+    
+    def _resolve_dims_raw(self, node: ast.AST) -> Optional[List[int]]:
+        """Extract raw dimensions from nested subscript syntax (e.g., bit[8][16])."""
         dims = []
         curr = node
+        
         while isinstance(curr, ast.Subscript):
-            if isinstance(curr.slice, ast.Constant):
-                dims.append(curr.slice.value)
+            val = self._eval_dim_expr(curr.slice)
+            if val is not None and isinstance(val, int):
+                dims.append(val)
             curr = curr.value
+        
         if isinstance(curr, ast.Name) and curr.id == 'bit':
-            return dims[::-1] # 回傳 [Depth, Width]
+            return dims[::-1]  # Reverse to get [depth, width] order
         return None
-
-    def _infer_width(self, node):
-        """遞迴推斷運算式的位元寬度 (新增 Tuple 支援)"""
-        # --- 新增: 處理位元串接 (Tuple) ---
+    
+    def _eval_dim_expr(self, node: ast.AST) -> Optional[int]:
+        """Evaluate a dimension expression to a constant integer.
+        
+        Handles constants, parameter references, and simple arithmetic.
+        """
+        if isinstance(node, ast.Constant):
+            return node.value
+        
+        if isinstance(node, ast.Name):
+            # Check parameter stack first (for loop variables, etc.)
+            if self.param_stack and node.id in self.param_stack[-1]:
+                return self.param_stack[-1][node.id]
+            # Then check module constants
+            if self.current_mod and node.id in self.current_mod.constants:
+                return self.current_mod.constants[node.id]
+            return None
+        
+        if isinstance(node, ast.BinOp):
+            left = self._eval_dim_expr(node.left)
+            right = self._eval_dim_expr(node.right)
+            if isinstance(left, int) and isinstance(right, int):
+                op_type = type(node.op)
+                if op_type in self.ARITH_OPS:
+                    return self.ARITH_OPS[op_type](left, right)
+        
+        return None
+    
+    def _infer_width(self, node: ast.AST) -> int:
+        """Infer the bit width of an expression."""
         if isinstance(node, ast.Tuple):
-            total_width = 0
-            for elt in node.elts:
-                total_width += self._infer_width(elt)
-            return total_width
-
-        # --- 以下為原本的邏輯 ---
+            return sum(self._infer_width(elt) for elt in node.elts)
+        
+        if isinstance(node, ast.IfExp):
+            return max(self._infer_width(node.body), self._infer_width(node.orelse))
+        
+        if isinstance(node, ast.UnaryOp):
+            return self._infer_width(node.operand)
+        
+        if isinstance(node, ast.Subscript):
+            if isinstance(node.slice, ast.Slice):
+                upper = self._eval_dim_expr(node.slice.lower)
+                lower = self._eval_dim_expr(node.slice.upper)
+                msb = upper if upper is not None else 0
+                lsb = lower if lower is not None else 0
+                return abs(msb - lsb) + 1
+            
+            name = self.visit(node.value)
+            if self.current_mod and name in self.current_mod.symbol_table:
+                dims = self.current_mod.symbol_table[name]['dims']
+                if len(dims) > 1:
+                    return dims[1]  # Array element width
+                return 1
+            return 1
+        
         if isinstance(node, ast.BinOp):
             w_l = self._infer_width(node.left)
             w_r = self._infer_width(node.right)
@@ -63,370 +213,699 @@ class PyHDLTranspiler(ast.NodeVisitor):
                 return max(w_l, w_r) + 1
             return max(w_l, w_r)
         
-        elif isinstance(node, (ast.Compare, ast.BoolOp)):
+        if isinstance(node, (ast.Compare, ast.BoolOp)):
             return 1
-            
-        elif isinstance(node, ast.UnaryOp):
-            return self._infer_width(node.operand)
-            
-        elif isinstance(node, ast.Name):
+        
+        if isinstance(node, ast.Name):
+            val = self._eval_dim_expr(node)
+            if val is not None:
+                return val
             if self.current_mod and node.id in self.current_mod.symbol_table:
                 dims = self.current_mod.symbol_table[node.id]['dims']
+                if dims and isinstance(dims[0], str):
+                    if dims[0] in self.current_mod.enums:
+                        return self.current_mod.enums[dims[0]]['width']
                 return dims[-1] if dims else 1
-                
-        elif isinstance(node, ast.Constant):
-            if node.value == 0: return 1
-            return math.floor(math.log2(abs(node.value))) + 1
-            
-        elif isinstance(node, ast.Subscript):
-            name = self.visit(node.value)
+        
+        if isinstance(node, ast.Attribute):
+            name = self.visit(node)
             if self.current_mod and name in self.current_mod.symbol_table:
                 dims = self.current_mod.symbol_table[name]['dims']
-                return dims[1] if len(dims) > 1 else 1
+                return dims[-1] if dims else 1
+        
+        if isinstance(node, ast.Constant):
+            if isinstance(node.value, int) and node.value != 0:
+                return math.floor(math.log2(abs(node.value))) + 1
+            return 1
+        
         return 1
-
-    def _format_sv_type(self, direction, name, dims):
-        """產出 SystemVerilog 的宣告字串 (支援 Enum 類型)"""
+    
+    # =========================================================================
+    # Helper Methods: Code Formatting
+    # =========================================================================
+    
+    def _format_sv_type(self, direction: str, name: str, dims: List) -> str:
+        """Format a SystemVerilog type declaration."""
         dir_prefix = f"{direction} " if direction else ""
         
-        # 檢查 dims[0] 是否為已定義的 Enum 名稱
-        if dims and isinstance(dims[0], str) and self.current_mod and dims[0] in self.current_mod.enums:
-            # 返回如 "State_t curr_state"
-            return f"{dir_prefix}{dims[0]}_t {name}"
-            
-        # 一般 bit 寬度格式化邏輯
+        # Enum type
+        if dims and isinstance(dims[0], str):
+            if self.current_mod and dims[0] in self.current_mod.enums:
+                return f"{dir_prefix}{dims[0]}_t {name}"
+        
+        # Scalar
         if not dims:
             return f"{dir_prefix}logic {name}"
-        elif len(dims) == 1:
+        
+        # 1D signal
+        if len(dims) == 1:
             return f"{dir_prefix}logic [{dims[0]-1}:0] {name}"
-        elif len(dims) == 2:
-            return f"{dir_prefix}logic [{dims[1]-1}:0] {name} [0:{dims[0]-1}]"
-        return f"{dir_prefix}logic {name}"
-
-    def _format_const(self, value, width):
-        """將常數格式化為 SV 標準: [width]'d[value]"""
-        # 如果寬度資訊大於 0，則加上位元數與十進位標記 'd
-        if width > 0:
-            return f"{width}'d{value}"
-        return str(value)
-
-    def _extract_edges(self, node):
-        """從條件式中提取 posedge/negedge 訊號用於敏感列表"""
+        
+        # 2D array (memory)
+        return f"{dir_prefix}logic [{dims[1]-1}:0] {name} [0:{dims[0]-1}]"
+    
+    def _format_const(self, value: int, width: int) -> str:
+        """Format a constant with explicit bit width."""
+        return f"{width}'d{value}" if width > 0 else str(value)
+    
+    def _extract_edges(self, node: ast.AST) -> List[Tuple[str, str]]:
+        """Extract clock edge specifications from a condition."""
         edges = []
         if isinstance(node, ast.Attribute) and node.attr in ['posedge', 'negedge']:
             edges.append((self.visit(node.value), node.attr))
-        elif isinstance(node, ast.BoolOp) and isinstance(node.op, ast.Or):
+        elif isinstance(node, ast.BoolOp):
             for val in node.values:
                 edges.extend(self._extract_edges(val))
         return edges
-
-    def visit_ClassDef(self, node):
-        """定義模組或狀態機列舉"""
-        # 檢查是否為 Enum 定義 (假設使用者繼承了 Enum 或類別名包含 State)
-        is_enum = any(isinstance(base, ast.Name) and base.id == 'Enum' for base in node.bases)
+    
+    # =========================================================================
+    # Parameterized Template Detection
+    # =========================================================================
+    
+    def _is_parameterized_template(self, node: ast.ClassDef) -> bool:
+        """Check if a class is a parameterized template (uses undefined variables)."""
         
-        if is_enum:
-            enum_name = node.name
-            states = {}
-            for stmt in node.body:
-                if isinstance(stmt, ast.Assign) and isinstance(stmt.targets[0], ast.Name):
-                    states[stmt.targets[0].id] = stmt.value.value
+        class UnboundVarChecker(ast.NodeVisitor):
+            """Helper visitor to detect unbound variable references."""
+            BUILTINS = {
+                'bit', 'In', 'Out', 'Module', 'Enum', 'range',
+                'True', 'False', 'None', 'not', 'and', 'or'
+            }
             
-            # 計算需要的位元寬度
-            width = math.ceil(math.log2(len(states))) if len(states) > 1 else 1
-            self.current_mod.enums[enum_name] = {'states': states, 'width': width}
+            def __init__(self, defined_names):
+                self.defined_names = defined_names
+                self.has_unbound = False
+            
+            def visit_Name(self, n):
+                if n.id not in self.defined_names and n.id not in self.BUILTINS:
+                    if isinstance(n.ctx, ast.Load):
+                        self.has_unbound = True
+                self.generic_visit(n)
+        
+        # Collect defined names within the class
+        defined = set()
+        
+        # Constants (NAME = Constant)
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):
+                if (len(stmt.targets) == 1 and
+                    isinstance(stmt.targets[0], ast.Name) and
+                    isinstance(stmt.value, ast.Constant)):
+                    defined.add(stmt.targets[0].id)
+            elif isinstance(stmt, ast.ClassDef):
+                defined.add(stmt.name)  # Nested Enum
+        
+        # Loop variables (including nested)
+        for child in ast.walk(node):
+            if isinstance(child, ast.For) and isinstance(child.target, ast.Name):
+                defined.add(child.target.id)
+        
+        # All assignment targets
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):
+                for t in stmt.targets:
+                    if isinstance(t, ast.Name):
+                        defined.add(t.id)
+        
+        # Add known template names
+        defined.update(self.templates.keys())
+        
+        # Check for unbound variables
+        checker = UnboundVarChecker(defined)
+        for stmt in node.body:
+            checker.visit(stmt)
+        
+        return checker.has_unbound
+    
+    # =========================================================================
+    # AST Visitors: Class and Module Handling
+    # =========================================================================
+    
+    def visit_ClassDef(self, node: ast.ClassDef):
+        """Process a class definition as a hardware module or Enum."""
+        # Handle Enum definitions
+        is_enum = any(
+            isinstance(base, ast.Name) and base.id == 'Enum'
+            for base in node.bases
+        )
+        if is_enum:
+            self._process_enum(node)
             return
-
-        # 原本的 Module 定義邏輯
-        mod_name = node.name
-        self.current_mod = ModuleContext(mod_name)
-        self.modules[mod_name] = self.current_mod
+        
+        # Store as template
+        self.templates[node.name] = node
+        
+        # Skip parameterized templates (will be generated on instantiation)
+        if self._is_parameterized_template(node):
+            return
+        
+        # Generate non-parameterized module immediately
+        self.current_mod = ModuleContext(node.name)
+        self.modules[node.name] = self.current_mod
         for stmt in node.body:
             self.visit(stmt)
         self.current_mod = None
-
-    def visit_Match(self, node):
-        """處理 FSM 狀態跳轉 (優化縮排版面)"""
-        subject = self.visit(node.subject)
-        case_lines = [f"unique case ({subject})"]
+    
+    def _process_enum(self, node: ast.ClassDef):
+        """Process an Enum class definition for FSM states."""
+        enum_name = node.name
+        states = {}
+        for stmt in node.body:
+            if isinstance(stmt, ast.Assign):
+                states[stmt.targets[0].id] = stmt.value.value
         
-        for case in node.cases:
-            pattern = self.visit(case.pattern)
-            
-            # 暫存當前序列塊，收集該分支下的語句
-            saved_clk = self.current_seq_clk
-            temp_list = self.current_mod.output_seq_blocks[saved_clk]
-            self.current_mod.output_seq_blocks[saved_clk] = []
-            
-            for stmt in case.body:
-                self.visit(stmt)
-            
-            # 【關鍵修正】將分支內部的每一行往右縮排 8 個空白
-            branch_stmts = []
-            for s in self.current_mod.output_seq_blocks[saved_clk]:
-                for line in s.split('\n'):
-                    branch_stmts.append(f"            {line}") # 加強縮排
-            
-            self.current_mod.output_seq_blocks[saved_clk] = temp_list
-            
-            # 將 case 標籤也加上 4 個空白的縮排
-            case_lines.append(f"    {pattern}: begin")
-            case_lines.extend(branch_stmts)
-            case_lines.append("    end")
-            
-        case_lines.append("endcase")
+        width = max(1, math.ceil(math.log2(len(states)))) if states else 1
+        self.current_mod.enums[enum_name] = {'states': states, 'width': width}
+    
+    # =========================================================================
+    # AST Visitors: Loop Unrolling
+    # =========================================================================
+    
+    def visit_For(self, node: ast.For):
+        """Process for loops by unrolling them at compile time."""
+        # Validate loop structure
+        if not (isinstance(node.iter, ast.Call) and
+                isinstance(node.iter.func, ast.Name) and
+                node.iter.func.id == 'range'):
+            self.warnings.append(
+                f"[{self.current_mod.name}] Only 'range()' loops supported."
+            )
+            return
         
-        if self.current_seq_clk:
-            self.current_mod.output_seq_blocks[self.current_seq_clk].append("\n".join(case_lines))
-
-    def visit_MatchValue(self, node):
-        """處理 case 裡面的數值，如 State.IDLE"""
-        return self.visit(node.value)
-
-    def visit_If(self, node):
-        """處理同步邊緣觸發 (Top-level) 或內部的條件分支 (Internal)"""
+        # Parse range arguments
+        args = node.iter.args
+        start, stop, step = 0, 0, 1
         
-        # --- 場景 1: 同步塊內部的條件邏輯 (如 if rst: 或 if start:) ---
-        if self.current_seq_clk:
-            cond = self.visit(node.test)
-            saved_clk = self.current_seq_clk
+        try:
+            if len(args) == 1:
+                stop = self._eval_dim_expr(args[0])
+            elif len(args) == 2:
+                start = self._eval_dim_expr(args[0])
+                stop = self._eval_dim_expr(args[1])
+            elif len(args) == 3:
+                start = self._eval_dim_expr(args[0])
+                stop = self._eval_dim_expr(args[1])
+                step = self._eval_dim_expr(args[2])
+            else:
+                raise ValueError("Invalid range arguments")
             
-            # 1. 捕捉 Body (If 成立的分支)
-            temp_list = self.current_mod.output_seq_blocks[saved_clk]
-            self.current_mod.output_seq_blocks[saved_clk] = [] # 開啟乾淨的 buffer
-            
+            if stop is None:
+                raise ValueError("Cannot evaluate range stop value")
+        except Exception:
+            self.warnings.append(
+                f"[{self.current_mod.name}] Loop range must be statically evaluable."
+            )
+            return
+        
+        # Unroll the loop
+        loop_var = node.target.id
+        for i in range(start, stop, step):
+            self.param_stack.append({loop_var: i})
             for stmt in node.body:
                 self.visit(stmt)
-            
-            # 對 body 內部的每一行進行縮排處理
-            body_code = []
-            for s in self.current_mod.output_seq_blocks[saved_clk]:
-                for line in s.split('\n'):
-                    body_code.append(f"    {line}") # 向右推 4格
-            
-            # 2. 捕捉 Orelse (Else 或 Elif 分支)
-            else_code = []
-            if node.orelse:
-                self.current_mod.output_seq_blocks[saved_clk] = [] # 清空以收集 else 內容
-                for stmt in node.orelse:
-                    self.visit(stmt)
-                
-                for s in self.current_mod.output_seq_blocks[saved_clk]:
-                    for line in s.split('\n'):
-                        else_code.append(f"    {line}") # 向右推 4格
-            
-            # 3. 恢復原始 Block 並組裝代碼
-            self.current_mod.output_seq_blocks[saved_clk] = temp_list
-            
-            if_str = f"if ({cond}) begin\n" + "\n".join(body_code) + "\nend"
-            if else_code:
-                if_str += " else begin\n" + "\n".join(else_code) + "\nend"
-            
-            self.current_mod.output_seq_blocks[saved_clk].append(if_str)
+            self.param_stack.pop()
+    
+    # =========================================================================
+    # AST Visitors: Assignment Handling
+    # =========================================================================
+    
+    def visit_Assign(self, node: ast.Assign):
+        """Process assignment statements."""
+        target_node = node.targets[0]
+        target = self.visit(target_node)
+        
+        # Case A: Constant definition (no hardware generated)
+        if self._handle_constant_def(node, target_node, target):
             return
-
-        # --- 場景 2: 頂層 If (偵測時脈或重置邊緣: clk.posedge) ---
+        
+        # Case B: Submodule port connection
+        if self._handle_port_connection(node, target_node, target):
+            return
+        
+        # Case C: Module instantiation
+        if self._handle_instantiation(node, target):
+            return
+        
+        # Case D: Signal declaration
+        if self._handle_declaration(node, target):
+            return
+        
+        # Case E: Logic assignment
+        self._handle_assignment(node, target_node, target)
+    
+    def _handle_constant_def(self, node, target_node, target) -> bool:
+        """Handle constant parameter definitions."""
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, int):
+            if isinstance(target_node, ast.Name):
+                is_not_in_block = (self.current_seq_clk is None)
+                is_not_signal = target not in self.current_mod.symbol_table
+                if is_not_in_block and is_not_signal:
+                    self.current_mod.constants[target] = node.value.value
+                    return True
+        return False
+    
+    def _handle_port_connection(self, node, target_node, target) -> bool:
+        """Handle submodule port connections (u1.port = signal)."""
+        if isinstance(target_node, ast.Attribute) and not self.current_seq_clk:
+            inst_name = self.visit(target_node.value)
+            port_name = target_node.attr
+            
+            if inst_name in self.current_mod.instances:
+                mod_type = self.current_mod.instances[inst_name]['mod']
+                sub_mod = self.modules[mod_type]
+                
+                # Find port width
+                port_w = 1
+                for p in sub_mod.ports:
+                    if p['name'] == port_name:
+                        port_w = p['dims'][-1] if p['dims'] else 1
+                        break
+                
+                # Format RHS
+                if isinstance(node.value, ast.Constant):
+                    rhs = self._format_const(node.value.value, port_w)
+                else:
+                    rhs = self.visit(node.value)
+                
+                self.current_mod.instances[inst_name]['mapping'][port_name] = rhs
+                return True
+        return False
+    
+    def _handle_instantiation(self, node, target) -> bool:
+        """Handle parameterized module instantiation."""
+        if not isinstance(node.value, ast.Call):
+            return False
+        if not hasattr(node.value.func, 'id'):
+            return False
+        if node.value.func.id not in self.templates:
+            return False
+        
+        base_mod_name = node.value.func.id
+        
+        # Collect parameters
+        params = {}
+        for keyword in node.value.keywords:
+            if isinstance(keyword.value, ast.Constant):
+                params[keyword.arg] = keyword.value.value
+        
+        # Generate unique module name
+        if params:
+            param_suffix = "_".join([f"{k}{v}" for k, v in params.items()])
+            actual_mod_name = f"{base_mod_name}_{param_suffix}"
+        else:
+            actual_mod_name = base_mod_name
+        
+        # Generate module if not already exists
+        if actual_mod_name not in self.modules:
+            prev_mod = self.current_mod
+            self.current_mod = ModuleContext(actual_mod_name)
+            self.modules[actual_mod_name] = self.current_mod
+            self.param_stack.append(params)
+            
+            template_node = self.templates[base_mod_name]
+            for stmt in template_node.body:
+                self.visit(stmt)
+            
+            self.param_stack.pop()
+            self.current_mod = prev_mod
+        
+        # Register instance and create intermediate signals
+        mod_ctx = self.modules[actual_mod_name]
+        self.current_mod.instances[target] = {'mod': actual_mod_name, 'mapping': {}}
+        
+        for p in mod_ctx.ports:
+            sig = f"{target}_{p['name']}"
+            self.current_mod.instances[target]['mapping'][p['name']] = sig
+            
+            if p['dir'] == 'output':
+                self.current_mod.symbol_table[sig] = {'dims': p['dims']}
+                self.current_mod.output_decls.append(
+                    self._format_sv_type("", sig, p['dims']) + ";"
+                )
+        
+        return True
+    
+    def _handle_declaration(self, node, target) -> bool:
+        """Handle signal/port declarations."""
+        dims, direction = self._resolve_dims(node.value)
+        
+        if dims is not None:
+            self.current_mod.symbol_table[target] = {'dims': dims}
+            
+            if direction:
+                self.current_mod.ports.append({
+                    'name': target, 'dir': direction, 'dims': dims
+                })
+            else:
+                self.current_mod.output_decls.append(
+                    self._format_sv_type("", target, dims) + ";"
+                )
+            return True
+        return False
+    
+    def _handle_assignment(self, node, target_node, target):
+        """Handle logic assignments (combinational or sequential)."""
+        # Infer width
+        rhs_w = self._infer_width(node.value)
+        
+        if target in self.current_mod.symbol_table:
+            lhs_dims = self.current_mod.symbol_table[target]['dims']
+            if lhs_dims and isinstance(lhs_dims[0], str):
+                lhs_width = self.current_mod.enums[lhs_dims[0]]['width']
+            else:
+                lhs_width = lhs_dims[-1] if lhs_dims else 1
+        else:
+            lhs_width = rhs_w
+            lhs_dims = [rhs_w]
+            if isinstance(target_node, ast.Name):
+                self.current_mod.symbol_table[target] = {'dims': lhs_dims}
+                self.current_mod.output_decls.append(
+                    self._format_sv_type("", target, lhs_dims) + ";"
+                )
+        
+        # Format RHS
+        if isinstance(node.value, ast.Constant):
+            rhs_code = self._format_const(node.value.value, lhs_width)
+        else:
+            rhs_code = self.visit(node.value)
+        
+        # Add to appropriate block
+        if self.current_seq_clk:
+            self.current_mod.output_seq_blocks[self.current_seq_clk].append(
+                f"{target} <= {rhs_code};"
+            )
+        else:
+            self.current_mod.main_comb_block.append(
+                f"{target} = {rhs_code};"
+            )
+    
+    # =========================================================================
+    # AST Visitors: Control Flow
+    # =========================================================================
+    
+    def visit_If(self, node: ast.If):
+        """Process if statements as combinational or sequential logic."""
+        # Already in sequential block
+        if self.current_seq_clk:
+            self._process_procedural_if(
+                node, self.current_mod.output_seq_blocks[self.current_seq_clk]
+            )
+            return
+        
+        # Check for clock edge trigger
         edges = self._extract_edges(node.test)
         if edges:
-            # 產生敏感列表 (Sensitivity List): posedge clk or posedge rst
+            # Sequential logic
             clk_spec = " or ".join([f"{edge} {name}" for name, edge in edges])
             self.current_seq_clk = clk_spec
             
             if clk_spec not in self.current_mod.output_seq_blocks:
                 self.current_mod.output_seq_blocks[clk_spec] = []
             
-            # 進入 Body 處理 (此時 current_seq_clk 已設定，內部的 Assign 會變為 <=)
             for stmt in node.body:
                 self.visit(stmt)
             
-            # 離開同步塊，重置標記
             self.current_seq_clk = None
         else:
-            # 場景 3: 頂層組合邏輯 If (可用於轉譯成三元運算子或警告)
-            # 在目前的 MVP 架構中，通常建議使用 assign out = cond ? a : b
-            print(f"Warning: 偵測到不含邊緣觸發的頂層 If，此功能尚未完整支援組合邏輯轉譯。")
-
-    def visit_Assign(self, node):
-        """處理宣告、實例化、埠號連線與邏輯賦值"""
+            # Combinational logic
+            self._process_procedural_if(node, self.current_mod.main_comb_block)
+    
+    def _process_procedural_if(self, node: ast.If, target_list: List[str]):
+        """Process an if statement into SystemVerilog if-else block."""
+        cond = self.visit(node.test)
+        original_list = list(target_list)
+        target_list.clear()
         
-        # 1. 處理左側為屬性的情況 (例如子模組埠號連線: u1.a = sw_a)
-        if isinstance(node.targets[0], ast.Attribute):
-            if not self.current_seq_clk: # 僅在組合邏輯層級處理連線
-                inst_name = self.visit(node.targets[0].value)
-                port_name = node.targets[0].attr
-                
-                if inst_name in self.current_mod.instances:
-                    mod_type = self.current_mod.instances[inst_name]['mod']
-                    sub_mod_context = self.modules[mod_type]
-                    
-                    # 尋找子模組該埠號的定義寬度
-                    port_width = 1
-                    for p in sub_mod_context.ports:
-                        if p['name'] == port_name:
-                            port_width = p['dims'][-1] if p['dims'] else 1
-                            break
-
-                    # 如果連線的是常數，格式化為 [width]'d[val]
-                    if isinstance(node.value, ast.Constant):
-                        rhs_code = self._format_const(node.value.value, port_width)
-                    else:
-                        rhs_code = self.visit(node.value)
-                        
-                    self.current_mod.instances[inst_name]['mapping'][port_name] = rhs_code
-            return
-
-        # 取得左側目標變數名稱
-        target = node.targets[0].id
-
-        # 2. 處理實例化語法: u1 = Adder()
-        if isinstance(node.value, ast.Call) and node.value.func.id in self.modules:
-            module_type = node.value.func.id
-            sub_mod_context = self.modules[module_type]
-            self.current_mod.instances[target] = {'mod': module_type, 'mapping': {}}
-            for port in sub_mod_context.ports:
-                if port['dir'] == 'output':
-                    internal_sig = f"{target}_{port['name']}"
-                    self.current_mod.instances[target]['mapping'][port['name']] = internal_sig
-                    self.current_mod.symbol_table[internal_sig] = {'dims': port['dims']}
-                    self.current_mod.output_decls.append(self._format_sv_type("", internal_sig, port['dims']) + ";")
-            return
-
-        # 3. 處理變數宣告 (In/Out/bit/Enum)
-        dims, direction = self._resolve_dims(node.value)
-        if dims is not None:
-            self.current_mod.symbol_table[target] = {'dims': dims}
-            if direction:
-                self.current_mod.ports.append({'name': target, 'dir': direction, 'dims': dims})
-            else:
-                decl_str = self._format_sv_type("", target, dims) + ";"
-                self.current_mod.output_decls.append(decl_str)
-            return
-
-        # 4. 處理邏輯賦值 (Combinational 或 Sequential)
-        rhs_w = self._infer_width(node.value)
+        # Process body
+        for stmt in node.body:
+            self.visit(stmt)
+        body_code = [f"    {line}" for s in target_list for line in s.split('\n')]
         
-        # --- 變數定義區域：確保 lhs_dims 在所有分支都被初始化 ---
-        if target in self.current_mod.symbol_table:
-            lhs_dims = self.current_mod.symbol_table[target]['dims']
-            # 處理 Enum 或一般位元寬度
-            if lhs_dims and isinstance(lhs_dims[0], str) and lhs_dims[0] in self.current_mod.enums:
-                lhs_width = self.current_mod.enums[lhs_dims[0]]['width']
-            else:
-                lhs_width = lhs_dims[-1] if lhs_dims else 1
-        else:
-            # 隱式宣告：變數第一次出現
-            lhs_width = rhs_w
-            lhs_dims = [rhs_w]
-            self.current_mod.symbol_table[target] = {'dims': lhs_dims}
-            self.current_mod.output_decls.append(self._format_sv_type("", target, lhs_dims) + ";")
-
-        # 5. 生成賦值內容與寬度檢查
-        if isinstance(node.value, ast.Constant):
-            rhs_code = self._format_const(node.value.value, lhs_width)
-        else:
-            rhs_code = self.visit(node.value)
-            # 寬度警告檢查 (僅針對非 Enum 型別且非空 dims)
-            is_enum_var = lhs_dims and isinstance(lhs_dims[0], str) and lhs_dims[0] in self.current_mod.enums
-            if not is_enum_var:
-                if lhs_width != rhs_w:
-                    print(f"Warning: '{target}' ({lhs_width}-bit) 與運算結果 ({rhs_w}-bit) 寬度不符。")
-
-        # 6. 生成賦值語句
-        if self.current_seq_clk:
-            self.current_mod.output_seq_blocks[self.current_seq_clk].append(f"{target} <= {rhs_code};")
-        else:
-            self.current_mod.output_assigns.append(f"assign {target} = {rhs_code};")
+        # Process else/elif
+        else_part = ""
+        if node.orelse:
+            target_list.clear()
+            is_elif = (len(node.orelse) == 1 and isinstance(node.orelse[0], ast.If))
             
-    # --- 運算子與基本節點 ---
-    def visit_BinOp(self, node):
-        ops = {ast.Add:'+', ast.Sub:'-', ast.BitAnd:'&', ast.BitOr:'|', ast.BitXor:'^', ast.LShift:'<<', ast.RShift:'>>'}
-        return f"({self.visit(node.left)} {ops.get(type(node.op), '+')} {self.visit(node.right)})"
-
-    def visit_Compare(self, node):
-        ops = {ast.Eq:'==', ast.NotEq:'!=', ast.Lt:'<', ast.LtE:'<=', ast.Gt:'>', ast.GtE:'>='}
-        return f"({self.visit(node.left)} {ops.get(type(node.ops[0]), '==')} {self.visit(node.comparators[0])})"
-
-    def visit_BoolOp(self, node):
-        op = "&&" if isinstance(node.op, ast.And) else "||"
-        return f"({f' {op} '.join([self.visit(v) for v in node.values])})"
-
-    def visit_UnaryOp(self, node):
-        ops = {ast.Not:'!', ast.Invert:'~', ast.USub:'-'}
-        return f"{ops.get(type(node.op), '')}{self.visit(node.operand)}"
-
-    def visit_Subscript(self, node):
+            if is_elif:
+                self.visit(node.orelse[0])
+                else_part = f" else {target_list[0]}"
+            else:
+                for stmt in node.orelse:
+                    self.visit(stmt)
+                else_code = [f"    {line}" for s in target_list for line in s.split('\n')]
+                else_part = " else begin\n" + "\n".join(else_code) + "\nend"
+        
+        # Reconstruct target list
+        target_list.clear()
+        target_list.extend(original_list)
+        full_block = f"if ({cond}) begin\n" + "\n".join(body_code) + "\nend" + else_part
+        target_list.append(full_block)
+    
+    def visit_Match(self, node: ast.Match):
+        """Process match statements as unique case blocks."""
+        target_list = (
+            self.current_mod.output_seq_blocks[self.current_seq_clk]
+            if self.current_seq_clk
+            else self.current_mod.main_comb_block
+        )
+        
+        subject = self.visit(node.subject)
+        case_lines = [f"unique case ({subject})"]
+        original_list = list(target_list)
+        
+        for case in node.cases:
+            pattern = self.visit(case.pattern)
+            target_list.clear()
+            
+            for stmt in case.body:
+                self.visit(stmt)
+            
+            branch_stmts = [f"        {line}" for s in target_list for line in s.split('\n')]
+            case_lines.append(f"    {pattern}: begin\n" + "\n".join(branch_stmts) + "\n    end")
+        
+        case_lines.append("endcase")
+        target_list.clear()
+        target_list.extend(original_list)
+        target_list.append("\n".join(case_lines))
+    
+    # =========================================================================
+    # AST Visitors: Expression Nodes
+    # =========================================================================
+    
+    def visit_IfExp(self, node: ast.IfExp) -> str:
+        """Ternary expression: a if cond else b -> (cond ? a : b)"""
+        cond = self.visit(node.test)
+        true_val = self.visit(node.body)
+        false_val = self.visit(node.orelse)
+        return f"({cond} ? {true_val} : {false_val})"
+    
+    def visit_UnaryOp(self, node: ast.UnaryOp) -> str:
+        """Unary operators: ~, !, -, +"""
+        operand = self.visit(node.operand)
+        
+        if isinstance(node.op, ast.Invert):
+            return f"(~{operand})"
+        if isinstance(node.op, ast.Not):
+            return f"(!{operand})"
+        if isinstance(node.op, ast.USub):
+            return f"(-{operand})"
+        return f"({operand})"
+    
+    def visit_BoolOp(self, node: ast.BoolOp) -> str:
+        """Boolean operators: and -> &&, or -> ||"""
+        op = '&&' if isinstance(node.op, ast.And) else '||'
+        values = [self.visit(v) for v in node.values]
+        return f"({f' {op} '.join(values)})"
+    
+    def visit_BinOp(self, node: ast.BinOp) -> str:
+        """Binary operators: +, -, *, /, %, &, |, ^, <<, >>"""
+        op_type = type(node.op)
+        if op_type in self.BINARY_OPS:
+            return f"({self.visit(node.left)} {self.BINARY_OPS[op_type]} {self.visit(node.right)})"
+        return f"({self.visit(node.left)} ? {self.visit(node.right)})"
+    
+    def visit_Compare(self, node: ast.Compare) -> str:
+        """Comparison operators: ==, !=, <, >, <=, >="""
+        op = self.COMPARE_OPS.get(type(node.ops[0]), '==')
+        return f"({self.visit(node.left)} {op} {self.visit(node.comparators[0])})"
+    
+    def visit_Subscript(self, node: ast.Subscript) -> str:
+        """Array/bit subscript: a[i], a[7:0]"""
         name = self.visit(node.value)
-        idx = self.visit(node.slice)
-        if name in self.current_mod.symbol_table:
+        declared_msb = None
+        
+        # Get declared bounds for bounds checking
+        if self.current_mod and name in self.current_mod.symbol_table:
             dims = self.current_mod.symbol_table[name]['dims']
-            if len(dims) >= 2 and isinstance(node.slice, ast.Constant):
-                if node.slice.value >= dims[0]:
-                    raise IndexError(f"Error: 陣閱 '{name}' 超界。深度 {dims[0]}, 存取 {node.slice.value}")
-        return f"{name}[{idx}]"
-
-    def visit_Name(self, node): return node.id
-    def visit_Constant(self, node): return str(node.value)
-
-    def visit_Tuple(self, node):
-        """處理位元串接，例如 (a, b) 轉為 {a, b}"""
-        # 拜訪元組中的每一個元素並轉換為字串
-        elements = [self.visit(elt) for elt in node.elts]
-        # 使用花括號組合
-        return f"{{{', '.join(elements)}}}"
-
-    def visit_Attribute(self, node):
-        """處理屬性存取，修正 Enum 前綴與子模組存取"""
-        value = self.visit(node.value) # 取得物件名稱，如 "State"
-        attr = node.attr               # 取得屬性名稱，如 "IDLE"
+            if dims:
+                if len(dims) > 1:
+                    declared_msb = dims[0] - 1  # Array depth
+                else:
+                    declared_msb = dims[-1] - 1  # Bit width
         
-        # 1. 檢查是否為 Enum 成員存取 (如 State.IDLE)
-        if self.current_mod and value in self.current_mod.enums:
-            if attr in self.current_mod.enums[value]['states']:
-                return attr # 直接返回 "IDLE"，去除 "State."
-        
-        # 2. 檢查是否為子模組輸出存取 (如 u1.s)
-        internal_sig_name = f"{value}_{attr}"
-        if self.current_mod and internal_sig_name in self.current_mod.symbol_table:
-            return internal_sig_name
-        
-        # 3. 預設返回原樣 (例如 clk.posedge)
-        return f"{value}.{attr}"
-
-    # --- 程式碼生成 ---
-    def get_verilog(self):
-        all_sv = []
-        for mod in self.modules.values():
-            port_s = ",\n".join([f"    {self._format_sv_type(p['dir'], p['name'], p['dims'])}" for p in mod.ports])
-            res = [f"module {mod.name} (\n{port_s}\n);"]
+        # Handle slice: a[7:0]
+        if isinstance(node.slice, ast.Slice):
+            msb = self._eval_dim_expr(node.slice.lower)
+            lsb = self._eval_dim_expr(node.slice.upper)
             
-            if mod.enums:
-                res.append("\n    // FSM State Definitions")
-                for e_name, info in mod.enums.items():
-                    states_str = ", ".join([f"{k}={v}" for k, v in info['states'].items()])
-                    res.append(f"    typedef enum logic [{info['width']-1}:0] {{{states_str}}} {e_name}_t;")
-
-            if mod.output_decls:
-                res.append("\n    // Internal Signals")
-                res.extend([f"    {d}" for d in mod.output_decls])
-                
-            if mod.instances:
-                res.append("\n    // Submodule Instantiations")
-                for n, info in mod.instances.items():
-                    # 生成如 .a(sw_a), .b(100), .s(u1_s)
-                    m_map = ", ".join([f".{p}({s})" for p, s in info['mapping'].items()])
-                    res.append(f"    {info['mod']} {n} ({m_map});")
-                    
-            if mod.output_assigns:
-                res.append("\n    // Combinational Logic")
-                res.extend([f"    {a}" for a in mod.output_assigns])
-                
-            for clk, stmts in mod.output_seq_blocks.items():
-                res.append(f"\n    always_ff @({clk}) begin")
-                for s in stmts:
-                    for line in s.split('\n'): 
-                        res.append(f"        {line}")
-                res.append("    end")
-                
-            res.append("\nendmodule")
-            all_sv.append("\n".join(res))
+            if msb is None or lsb is None:
+                raise ValueError(f"Error: Slice '{name}' must have explicit start/stop.")
+            
+            if declared_msb is not None and msb > declared_msb:
+                self.warnings.append(
+                    f"[{self.current_mod.name}] Out of bounds: {name}[{msb}] exceeds [0:{declared_msb}]"
+                )
+            
+            return f"{name}[{msb}:{lsb}]"
+        
+        # Handle index: a[i]
+        if isinstance(node.slice, ast.Constant):
+            idx_val = node.slice.value
+            idx = str(idx_val)
+        else:
+            idx_val = self._eval_dim_expr(node.slice)
+            idx = str(idx_val) if idx_val is not None else self.visit(node.slice)
+        
+        # Bounds check
+        if declared_msb is not None and idx_val is not None and isinstance(idx_val, int):
+            if idx_val > declared_msb:
+                self.warnings.append(
+                    f"[{self.current_mod.name}] Out of bounds: {name}[{idx_val}] exceeds [0:{declared_msb}]"
+                )
+        
+        return f"{name}[{idx}]"
+    
+    def visit_Attribute(self, node: ast.Attribute) -> str:
+        """Attribute access: State.IDLE, u1.result"""
+        v = self.visit(node.value)
+        a = node.attr
+        
+        # Enum member
+        if self.current_mod and v in self.current_mod.enums:
+            if a in self.current_mod.enums[v]['states']:
+                return a
+            raise ValueError(f"Error: Enum '{v}' has no member '{a}'")
+        
+        # Submodule signal
+        if self.current_mod and f"{v}_{a}" in self.current_mod.symbol_table:
+            return f"{v}_{a}"
+        
+        return f"{v}.{a}"
+    
+    def visit_Tuple(self, node: ast.Tuple) -> str:
+        """Tuple concatenation: (a, b) -> {a, b}"""
+        elements = []
+        for e in node.elts:
+            if isinstance(e, ast.Constant) and isinstance(e.value, int):
+                elements.append(f"1'd{e.value}")
+            else:
+                elements.append(self.visit(e))
+        return f"{{{', '.join(elements)}}}"
+    
+    def visit_Name(self, node: ast.Name) -> str:
+        """Variable reference with parameter substitution."""
+        # Check parameter stack
+        if self.param_stack and node.id in self.param_stack[-1]:
+            return str(self.param_stack[-1][node.id])
+        
+        # Check module constants
+        if self.current_mod and node.id in self.current_mod.constants:
+            return str(self.current_mod.constants[node.id])
+        
+        return node.id
+    
+    def visit_Constant(self, node: ast.Constant) -> str:
+        """Constant value."""
+        return str(node.value)
+    
+    def visit_MatchValue(self, node) -> str:
+        """Match case pattern value."""
+        return self.visit(node.value)
+    
+    # =========================================================================
+    # Code Generation
+    # =========================================================================
+    
+    def get_verilog(self) -> str:
+        """Generate the complete SystemVerilog output."""
+        all_sv = []
+        
+        for mod in self.modules.values():
+            sv_lines = self._generate_module(mod)
+            all_sv.append("\n".join(sv_lines))
+        
         return "\n\n".join(all_sv)
+    
+    def _generate_module(self, mod: ModuleContext) -> List[str]:
+        """Generate SystemVerilog for a single module."""
+        lines = []
+        
+        # Module header
+        ports = ",\n".join([
+            f"    {self._format_sv_type(p['dir'], p['name'], p['dims'])}"
+            for p in mod.ports
+        ])
+        lines.append(f"module {mod.name} (\n{ports}\n);")
+        
+        # Enum typedefs
+        for name, info in mod.enums.items():
+            states = ", ".join([f"{k}={v}" for k, v in info['states'].items()])
+            lines.append(
+                f"    typedef enum logic [{info['width']-1}:0] {{{states}}} {name}_t;"
+            )
+        
+        # Internal signal declarations
+        for decl in mod.output_decls:
+            lines.append(f"    {decl}")
+        
+        # Submodule instances
+        for inst_name, inst_info in mod.instances.items():
+            mapping = ", ".join([
+                f".{port}({sig})"
+                for port, sig in inst_info['mapping'].items()
+            ])
+            lines.append(f"    {inst_info['mod']} {inst_name} ({mapping});")
+        
+        # Combinational logic block
+        if mod.main_comb_block:
+            formatted = "\n".join([
+                f"        {line}"
+                for stmt in mod.main_comb_block
+                for line in stmt.split('\n')
+            ])
+            lines.append(f"    always_comb begin\n{formatted}\n    end")
+        
+        # Sequential logic blocks
+        for clk_spec, stmts in mod.output_seq_blocks.items():
+            formatted = "\n".join([
+                f"        {line}"
+                for stmt in stmts
+                for line in stmt.split('\n')
+            ])
+            lines.append(f"    always_ff @({clk_spec}) begin\n{formatted}\n    end")
+        
+        lines.append("endmodule")
+        return lines
+    
+    def generate_report(self) -> str:
+        """Generate a transpilation summary report."""
+        report = [
+            "=" * 40,
+            "  PyHDL Transpilation Summary",
+            "=" * 40
+        ]
+        
+        for mod in self.modules.values():
+            report.append(
+                f"Module: {mod.name}\n"
+                f"  - Ports: {len(mod.ports)}\n"
+                f"  - Internal Signals: {len(mod.output_decls)}"
+            )
+        
+        report.append(f"Total Warnings: {len(self.warnings)}")
+        for w in self.warnings:
+            report.append(f"  [!] {w}")
+        
+        report.append("=" * 40)
+        return "\n".join(report)

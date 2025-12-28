@@ -1,0 +1,95 @@
+# =================================================================
+# 測試 07: 記憶體與陣列
+# 驗證目標：
+#   1. 二維陣列宣告 bit[DEPTH][WIDTH]
+#   2. 陣列讀寫
+#   3. 同步 RAM
+#   4. 雙埠 RAM
+# =================================================================
+from core import bit, In, Out, Module
+
+class SinglePortRAM(Module):
+    DEPTH = 16
+    DATA_W = 8
+    ADDR_W = 4
+    
+    clk = In(bit)
+    we = In(bit)
+    addr = In(bit[ADDR_W])
+    din = In(bit[DATA_W])
+    dout = Out(bit[DATA_W])
+    
+    # 記憶體陣列
+    mem = bit[DEPTH][DATA_W]
+    
+    # 同步寫入
+    if clk.posedge:
+        if we:
+            mem[addr] = din
+    
+    # 組合讀取
+    dout = mem[addr]
+
+class DualPortRAM(Module):
+    DEPTH = 16
+    DATA_W = 8
+    ADDR_W = 4
+    
+    clk = In(bit)
+    
+    # Port A (讀寫)
+    we_a = In(bit)
+    addr_a = In(bit[ADDR_W])
+    din_a = In(bit[DATA_W])
+    dout_a = Out(bit[DATA_W])
+    
+    # Port B (只讀)
+    addr_b = In(bit[ADDR_W])
+    dout_b = Out(bit[DATA_W])
+    
+    mem = bit[DEPTH][DATA_W]
+    
+    # Port A 寫入
+    if clk.posedge:
+        if we_a:
+            mem[addr_a] = din_a
+    
+    # 雙埠讀取
+    dout_a = mem[addr_a]
+    dout_b = mem[addr_b]
+
+class RegisterFile(Module):
+    NUM_REGS = 8
+    DATA_W = 32
+    ADDR_W = 3
+    
+    clk = In(bit)
+    rst_n = In(bit)
+    
+    # 寫入埠
+    we = In(bit)
+    waddr = In(bit[ADDR_W])
+    wdata = In(bit[DATA_W])
+    
+    # 讀取埠 1
+    raddr1 = In(bit[ADDR_W])
+    rdata1 = Out(bit[DATA_W])
+    
+    # 讀取埠 2
+    raddr2 = In(bit[ADDR_W])
+    rdata2 = Out(bit[DATA_W])
+    
+    # 暫存器檔
+    regs = bit[NUM_REGS][DATA_W]
+    
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            for i in range(NUM_REGS):
+                regs[i] = 0
+        else:
+            if we:
+                regs[waddr] = wdata
+    
+    # 組合讀取
+    rdata1 = regs[raddr1]
+    rdata2 = regs[raddr2]

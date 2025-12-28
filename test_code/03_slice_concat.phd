@@ -1,0 +1,48 @@
+# =================================================================
+# 測試 03: 位元切片與串接
+# 驗證目標：
+#   1. 位元切片 data[7:0]
+#   2. 單一位元選取 data[i]
+#   3. 元組串接 (a, b, c) -> {a, b, c}
+#   4. 常數在串接中的處理
+# =================================================================
+from core import bit, In, Out, Module
+
+class BitSlicing(Module):
+    data_16 = In(bit[16])
+    
+    high_byte = Out(bit[8])
+    low_byte = Out(bit[8])
+    nibble = Out(bit[4])
+    single_bit = Out(bit)
+    
+    # 切片操作
+    high_byte = data_16[15:8]
+    low_byte = data_16[7:0]
+    nibble = data_16[11:8]
+    single_bit = data_16[0]
+
+class BitConcat(Module):
+    a = In(bit[4])
+    b = In(bit[4])
+    c = In(bit[8])
+    sel = In(bit)
+    
+    concat_8 = Out(bit[8])
+    concat_16 = Out(bit[16])
+    concat_with_const = Out(bit[10])
+    
+    # 串接操作
+    concat_8 = (a, b)           # 4 + 4 = 8 bits
+    concat_16 = (a, b, c)       # 4 + 4 + 8 = 16 bits
+    concat_with_const = (sel, 0, c)  # 1 + 1 + 8 = 10 bits，0 應轉為 1'd0
+
+class MixedSliceConcat(Module):
+    data_32 = In(bit[32])
+    
+    rearranged = Out(bit[32])
+    swapped_16 = Out(bit[16])
+    
+    # 混合切片與串接
+    rearranged = (data_32[7:0], data_32[15:8], data_32[23:16], data_32[31:24])
+    swapped_16 = (data_32[7:0], data_32[15:8])

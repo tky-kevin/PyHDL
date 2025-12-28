@@ -1,0 +1,75 @@
+# =================================================================
+# 測試 05: 時序邏輯
+# 驗證目標：
+#   1. posedge 觸發 (always_ff @(posedge clk))
+#   2. 同步復位
+#   3. 非同步高電平復位 (posedge rst)
+#   4. 非同步低電平復位 (negedge rst_n)
+#   5. 計數器、暫存器
+# =================================================================
+from core import bit, In, Out, Module
+
+class SimpleRegister(Module):
+    clk = In(bit)
+    d = In(bit[8])
+    q = Out(bit[8])
+    
+    # 簡單暫存器 (無復位)
+    if clk.posedge:
+        q = d
+
+class SyncResetCounter(Module):
+    clk = In(bit)
+    rst = In(bit)
+    enable = In(bit)
+    
+    count = Out(bit[8])
+    
+    # 同步復位計數器
+    if clk.posedge:
+        if rst:
+            count = 0
+        elif enable:
+            count = count + 1
+
+class AsyncResetCounter(Module):
+    clk = In(bit)
+    rst = In(bit)
+    enable = In(bit)
+    
+    count = Out(bit[8])
+    
+    # 非同步高電平復位
+    if clk.posedge or rst.posedge:
+        if rst:
+            count = 0
+        elif enable:
+            count = count + 1
+
+class AsyncResetNCounter(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    enable = In(bit)
+    
+    count = Out(bit[8])
+    
+    # 非同步低電平復位 (工業標準)
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            count = 0
+        elif enable:
+            count = count + 1
+
+class ShiftRegister(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    serial_in = In(bit)
+    
+    parallel_out = Out(bit[8])
+    
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            parallel_out = 0
+        else:
+            # 左移並填入新位元
+            parallel_out = (parallel_out[6:0], serial_in)

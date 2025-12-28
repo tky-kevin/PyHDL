@@ -1,0 +1,194 @@
+# =================================================================
+# 交通燈控制器展示模組
+# 功能：簡單的紅綠燈 FSM 控制器
+# 展示重點：
+#   1. Enum 狀態定義 → typedef enum
+#   2. match-case → unique case
+#   3. 時序邏輯 (always_ff)
+#   4. 組合邏輯 (always_comb)
+#   5. 非同步低電平復位
+# =================================================================
+from core import bit, In, Out, Module, Enum
+
+class TrafficLight(Module):
+    # --- 介面 ---
+    clk = In(bit)
+    rst_n = In(bit)       # 非同步低電平復位
+    
+    # 計時器輸入（假設外部提供秒脈衝）
+    tick = In(bit)        # 每秒一個脈衝
+    
+    # 緊急模式（警車/救護車）
+    emergency = In(bit)
+    
+    # 燈號輸出 (主幹道)
+    main_red = Out(bit)
+    main_yellow = Out(bit)
+    main_green = Out(bit)
+    
+    # 燈號輸出 (支道)
+    side_red = Out(bit)
+    side_yellow = Out(bit)
+    side_green = Out(bit)
+    
+    # --- 參數 ---
+    GREEN_TIME = 10   # 綠燈 10 秒
+    YELLOW_TIME = 3   # 黃燈 3 秒
+    
+    # --- 狀態定義 ---
+    class State(Enum):
+        MAIN_GREEN = 0    # 主幹道綠燈
+        MAIN_YELLOW = 1   # 主幹道黃燈
+        SIDE_GREEN = 2    # 支道綠燈
+        SIDE_YELLOW = 3   # 支道黃燈
+        EMERGENCY = 4     # 緊急模式（全紅閃爍）
+    
+    # --- 內部訊號 ---
+    state = State
+    counter = bit[4]      # 計數器 (0-15)
+    
+    # --- 時序邏輯：狀態轉移 ---
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            # 復位：主幹道綠燈開始
+            state = State.MAIN_GREEN
+            counter = 0
+        else:
+            # 緊急模式優先
+            if emergency:
+                state = State.EMERGENCY
+                counter = 0
+            else:
+                # 正常狀態機
+                match state:
+                    case State.MAIN_GREEN:
+                        if tick:
+                            if counter == GREEN_TIME - 1:
+                                state = State.MAIN_YELLOW
+                                counter = 0
+                            else:
+                                counter = counter + 1
+                    
+                    case State.MAIN_YELLOW:
+                        if tick:
+                            if counter == YELLOW_TIME - 1:
+                                state = State.SIDE_GREEN
+                                counter = 0
+                            else:
+                                counter = counter + 1
+                    
+                    case State.SIDE_GREEN:
+                        if tick:
+                            if counter == GREEN_TIME - 1:
+                                state = State.SIDE_YELLOW
+                                counter = 0
+                            else:
+                                counter = counter + 1
+                    
+                    case State.SIDE_YELLOW:
+                        if tick:
+                            if counter == YELLOW_TIME - 1:
+                                state = State.MAIN_GREEN
+                                counter = 0
+                            else:
+                                counter = counter + 1
+                    
+                    case State.EMERGENCY:
+                        # 緊急解除後回到主幹道綠燈
+                        state = State.MAIN_GREEN
+                        counter = 0
+    
+    # --- 組合邏輯：燈號輸出 ---
+    # 預設值（全滅）
+    main_red = 0
+    main_yellow = 0
+    main_green = 0
+    side_red = 0
+    side_yellow = 0
+    side_green = 0
+    
+    match state:
+        case State.MAIN_GREEN:
+            main_green = 1
+            side_red = 1
+        
+        case State.MAIN_YELLOW:
+            main_yellow = 1
+            side_red = 1
+        
+        case State.SIDE_GREEN:
+            main_red = 1
+            side_green = 1
+        
+        case State.SIDE_YELLOW:
+            main_red = 1
+            side_yellow = 1
+        
+        case State.EMERGENCY:
+            # 緊急模式：全紅
+            main_red = 1
+            side_red = 1
+
+
+# =================================================================
+# 簡化版：只有三個燈的單向控制器
+# 更簡潔，適合快速展示
+# =================================================================
+class SimpleTrafficLight(Module):
+    clk = In(bit)
+    rst_n = In(bit)
+    tick = In(bit)
+    
+    red = Out(bit)
+    yellow = Out(bit)
+    green = Out(bit)
+    
+    class Light(Enum):
+        RED = 0
+        GREEN = 1
+        YELLOW = 2
+    
+    state = Light
+    count = bit[4]
+    
+    # 時序邏輯
+    if clk.posedge or rst_n.negedge:
+        if not rst_n:
+            state = Light.RED
+            count = 0
+        else:
+            if tick:
+                match state:
+                    case Light.RED:
+                        if count == 5:  # 紅燈 5 秒
+                            state = Light.GREEN
+                            count = 0
+                        else:
+                            count = count + 1
+                    
+                    case Light.GREEN:
+                        if count == 8:  # 綠燈 8 秒
+                            state = Light.YELLOW
+                            count = 0
+                        else:
+                            count = count + 1
+                    
+                    case Light.YELLOW:
+                        if count == 2:  # 黃燈 2 秒
+                            state = Light.RED
+                            count = 0
+                        else:
+                            count = count + 1
+    
+    # 組合邏輯：輸出
+    red = 0
+    yellow = 0
+    green = 0
+    
+    match state:
+        case Light.RED:
+            red = 1
+        case Light.GREEN:
+            green = 1
+        case Light.YELLOW:
+            yellow = 1

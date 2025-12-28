@@ -1,0 +1,86 @@
+# =================================================================
+# 測試 06: 迴圈展開
+# 驗證目標：
+#   1. for i in range(N) 靜態展開
+#   2. range(start, stop) 形式
+#   3. range(start, stop, step) 形式
+#   4. 迴圈內的條件邏輯
+# =================================================================
+from core import bit, In, Out, Module
+
+class BitReverse(Module):
+    WIDTH = 8
+    
+    data_in = In(bit[WIDTH])
+    data_out = Out(bit[WIDTH])
+    
+    # 位元反轉：使用迴圈展開
+    for i in range(WIDTH):
+        data_out[i] = data_in[WIDTH - 1 - i]
+
+class ParityGenerator(Module):
+    WIDTH = 8
+    
+    data = In(bit[WIDTH])
+    parity = Out(bit)
+    
+    # 計算偶同位 (XOR 所有位元)
+    temp = bit
+    temp = 0
+    
+    for i in range(WIDTH):
+        temp = temp ^ data[i]
+    
+    parity = temp
+
+class LoopWithStep(Module):
+    data = In(bit[8])
+    
+    even_bits = Out(bit[4])
+    odd_bits = Out(bit[4])
+    
+    # 取偶數位元 (0, 2, 4, 6)
+    for i in range(0, 8, 2):
+        even_bits[i / 2] = data[i]
+    
+    # 取奇數位元 (1, 3, 5, 7)
+    for i in range(1, 8, 2):
+        odd_bits[i / 2] = data[i]
+
+class PriorityEncoderLoop(Module):
+    WIDTH = 8
+    CODE_W = 3
+    
+    req = In(bit[WIDTH])
+    code = Out(bit[CODE_W])
+    valid = Out(bit)
+    
+    # 預設值
+    code = 0
+    valid = 0
+    
+    # 使用迴圈生成優先權邏輯
+    # 利用 "最後賦值生效" 機制實現 MSB 優先
+    for i in range(WIDTH):
+        if req[i]:
+            code = i
+            valid = 1
+
+class ArrayInit(Module):
+    clk = In(bit)
+    rst = In(bit)
+    
+    DEPTH = 8
+    DATA_W = 8
+    
+    mem = bit[DEPTH][DATA_W]
+    ready = Out(bit)
+    
+    if clk.posedge or rst.posedge:
+        if rst:
+            ready = 0
+            # 使用迴圈清空記憶體
+            for i in range(DEPTH):
+                mem[i] = 0
+        else:
+            ready = 1

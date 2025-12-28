@@ -1,0 +1,46 @@
+# =================================================================
+# 測試 01: 基本埠宣告與位元寬度
+# 驗證目標：
+#   1. In/Out 埠宣告
+#   2. 各種位元寬度 (1-bit, N-bit)
+#   3. 簡單組合邏輯賦值
+# =================================================================
+from core import bit, In, Out, Module
+
+class BasicPorts(Module):
+    # 1-bit 埠
+    clk = In(bit)
+    rst = In(bit)
+    enable = In(bit)
+    
+    # 多位元埠
+    data_in_8 = In(bit[8])
+    data_in_16 = In(bit[16])
+    data_in_32 = In(bit[32])
+    
+    # 輸出埠
+    data_out_8 = Out(bit[8])
+    data_out_16 = Out(bit[16])
+    status = Out(bit)
+    
+    # 組合邏輯直接賦值
+    data_out_8 = data_in_8
+    data_out_16 = data_in_16
+    status = enable
+
+class WidthCalculation(Module):
+    # 測試參數化寬度計算
+    WIDTH = 8
+    HALF = 4
+    
+    a = In(bit[WIDTH])
+    b = In(bit[WIDTH])
+    
+    # 加法結果需要多 1 bit
+    sum_out = Out(bit[WIDTH + 1])
+    
+    # 半寬輸出
+    low_half = Out(bit[HALF])
+    
+    sum_out = a + b
+    low_half = a[3:0]
