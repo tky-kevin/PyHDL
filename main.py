@@ -17,4 +17,4 @@ def run_transpiler(file_path):
     print(transpiler.get_verilog())
 
 if __name__ == "__main__":
-    run_transpiler("example_input.py")
+    run_transpiler("test_code/example_code.phd")

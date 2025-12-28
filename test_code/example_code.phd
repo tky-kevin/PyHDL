@@ -1,0 +1,14 @@
+from core import *
+
+# 簡潔的埠號宣告
+clk = In(bit)
+a   = In(bit[8])
+b   = In(bit[8])
+q   = Out(bit[9])
+
+# 內部的二維陣列 (8列, 16行)
+mem = bit[8][16]
+
+# 運算 (自動推斷 temp 寬度並轉譯索引)
+temp = mem[3] + a
+q    = temp + b
