@@ -22,6 +22,7 @@
   - [參數化模組](#參數化模組)
 - [專案結構](#專案結構)
 - [範例程式](#範例程式)
+- [命令列用法](#命令列用法)
 - [已知限制](#已知限制)
 - [貢獻指南](#貢獻指南)
 
@@ -406,7 +407,7 @@ class TrafficLight(Module):
 **生成的 SystemVerilog：**
 
 ```systemverilog
-typedef enum logic [1:0] {RED=0, GREEN=1, YELLOW=2} State_t;
+typedef enum logic [1:0] {RED=2'd0, GREEN=2'd1, YELLOW=2'd2} State_t;
 State_t state;
 
 always_ff @(posedge clk or negedge rst_n) begin
@@ -417,6 +418,8 @@ always_ff @(posedge clk or negedge rst_n) begin
             RED: state <= GREEN;
             GREEN: state <= YELLOW;
             YELLOW: state <= RED;
+            default: begin
+            end
         endcase
     end
 end
@@ -429,6 +432,8 @@ always_comb begin
         RED: red = 1'd1;
         GREEN: green = 1'd1;
         YELLOW: yellow = 1'd1;
+        default: begin
+        end
     endcase
 end
 ```
@@ -487,11 +492,13 @@ endmodule
 
 ```
 pyhdl/
-├── compiler.py        # 命令列介面入口
+├── pyhdl.py           # 主入口與基礎類別（Module, In, Out, bit, Enum）
+├── compiler.py        # 命令列介面實作
 ├── transpiler.py      # 核心轉譯器（AST 訪問器與程式碼生成器）
-├── pyhdl.py           # PyHDL 基礎類別（Module, In, Out, bit, Enum）
+├── .vscode/           # VS Code 設定（可選）
 ├── test_code/         # 範例 .phd 原始碼
 │   ├── demo_alu.phd
+│   ├── demo_piano.phd
 │   ├── demo_traffic_light.phd
 │   └── ...
 ├── test_output/       # 生成的 .sv 檔案
@@ -508,6 +515,7 @@ pyhdl/
 | 檔案 | 說明 |
 |------|------|
 | `demo_alu.phd` | 8 位元 ALU，支援 8 種運算（ADD, SUB, AND, OR, XOR, NOR, SLTU, SLL） |
+| `demo_piano.phd` | 電子琴模組，含錄音/回放功能 |
 | `demo_traffic_light.phd` | 交通燈 FSM 控制器 |
 | `01_basic_ports.phd` | 埠宣告與寬度計算 |
 | `02_operators.phd` | 所有支援的運算符 |
