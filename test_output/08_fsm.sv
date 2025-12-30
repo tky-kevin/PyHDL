@@ -9,7 +9,7 @@ module SimpleFSM (
     output logic busy,
     output logic complete
 );
-    typedef enum logic [1:0] {IDLE=0, RUN=1, FINISH=2} State_t;
+    typedef enum logic [1:0] {IDLE=2'd0, RUN=2'd1, FINISH=2'd2} State_t;
     State_t state;
     always_ff @(posedge clk or negedge rst_n) begin
         if ((!rst_n)) begin
@@ -36,6 +36,8 @@ module SimpleFSM (
                     complete <= 1'd1;
                     state <= IDLE;
                 end
+                default: begin
+                end
             endcase
         end
     end
@@ -49,7 +51,7 @@ module TrafficLightFSM (
     output logic yellow,
     output logic green
 );
-    typedef enum logic [1:0] {RED=0, GREEN=1, YELLOW=2} Light_t;
+    typedef enum logic [1:0] {RED=2'd0, GREEN=2'd1, YELLOW=2'd2} Light_t;
     Light_t curr_light;
     always_comb begin
         red = 1'd0;
@@ -64,6 +66,8 @@ module TrafficLightFSM (
             end
             YELLOW: begin
                 yellow = 1'd1;
+            end
+            default: begin
             end
         endcase
     end
@@ -87,6 +91,8 @@ module TrafficLightFSM (
                         curr_light <= RED;
                     end
                 end
+                default: begin
+                end
             endcase
         end
     end
@@ -100,7 +106,7 @@ module UARTReceiverFSM (
     output logic [7:0] data_out,
     output logic data_valid
 );
-    typedef enum logic [1:0] {IDLE=0, START=1, DATA=2, STOP=3} RxState_t;
+    typedef enum logic [1:0] {IDLE=2'd0, START=2'd1, DATA=2'd2, STOP=2'd3} RxState_t;
     RxState_t state;
     logic [3:0] bit_cnt;
     logic [7:0] shift_reg;
@@ -142,6 +148,8 @@ module UARTReceiverFSM (
                         end
                         state <= IDLE;
                     end
+                end
+                default: begin
                 end
             endcase
         end

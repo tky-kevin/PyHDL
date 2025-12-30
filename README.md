@@ -62,12 +62,29 @@
 
 ```bash
 # 複製專案
-git clone https://github.com/yourusername/pyhdl.git
+git clone https://github.com/tky-kevin/PyHDL.git
 cd pyhdl
 
 # 安裝相依套件
 pip install colorama
 ```
+
+### VS Code 設定（推薦）
+
+為了獲得 `.phd` 檔案的語法高亮和 Linter 支援，請在專案根目錄建立 `.vscode/settings.json`：
+
+```json
+{
+    "files.associations": {
+        "*.phd": "python"
+    },
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}/pyhdl"
+    ]
+}
+```
+
+> **說明**：`extraPaths` 指向 `pyhdl.py` 所在的目錄，讓 VS Code 能正確解析 `from pyhdl import *`。
 
 ---
 

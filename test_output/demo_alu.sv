@@ -52,6 +52,8 @@ module SimpleALU (
             7: begin
                 result = (a << b[2:0]);
             end
+            default: begin
+            end
         endcase
         if ((result == 0)) begin
             zero = 1'd1;

@@ -1,0 +1,8 @@
+{
+    "files.associations": {
+        "*.phd": "python"
+    },
+    "python.analysis.extraPaths": [
+        "${workspaceFolder}"
+    ]
+}

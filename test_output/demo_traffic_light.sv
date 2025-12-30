@@ -13,7 +13,7 @@ module TrafficLight (
     output logic side_yellow,
     output logic side_green
 );
-    typedef enum logic [2:0] {MAIN_GREEN=0, MAIN_YELLOW=1, SIDE_GREEN=2, SIDE_YELLOW=3, EMERGENCY=4} State_t;
+    typedef enum logic [2:0] {MAIN_GREEN=3'd0, MAIN_YELLOW=3'd1, SIDE_GREEN=3'd2, SIDE_YELLOW=3'd3, EMERGENCY=3'd4} State_t;
     State_t state;
     logic [3:0] counter;
     always_comb begin
@@ -43,6 +43,8 @@ module TrafficLight (
             EMERGENCY: begin
                 main_red = 1'd1;
                 side_red = 1'd1;
+            end
+            default: begin
             end
         endcase
     end
@@ -99,6 +101,8 @@ module TrafficLight (
                     state <= MAIN_GREEN;
                     counter <= 4'd0;
                 end
+                default: begin
+                end
             endcase
         end
     end
@@ -112,7 +116,7 @@ module SimpleTrafficLight (
     output logic yellow,
     output logic green
 );
-    typedef enum logic [1:0] {RED=0, GREEN=1, YELLOW=2} Light_t;
+    typedef enum logic [1:0] {RED=2'd0, GREEN=2'd1, YELLOW=2'd2} Light_t;
     Light_t state;
     logic [3:0] count;
     always_comb begin
@@ -128,6 +132,8 @@ module SimpleTrafficLight (
             end
             YELLOW: begin
                 yellow = 1'd1;
+            end
+            default: begin
             end
         endcase
     end
@@ -160,6 +166,8 @@ module SimpleTrafficLight (
                     end else begin
                         count <= (count + 1);
                     end
+                end
+                default: begin
                 end
             endcase
         end
